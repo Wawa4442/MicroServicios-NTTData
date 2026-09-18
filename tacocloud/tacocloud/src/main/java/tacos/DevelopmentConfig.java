@@ -1,5 +1,6 @@
 package tacos;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 
 import org.springframework.boot.CommandLineRunner;
@@ -13,6 +14,7 @@ import tacos.data.IngredientRepository;
 import tacos.data.PaymentMethodRepository;
 import tacos.data.TacoRepository;
 import tacos.data.UserRepository;
+import tacos.payment.PaymentGateway;
 
 @Profile("!prod")
 @Configuration
@@ -21,30 +23,35 @@ public class DevelopmentConfig {
   @Bean
   public CommandLineRunner dataLoader(IngredientRepository repo,
         UserRepository userRepo, PasswordEncoder encoder, TacoRepository tacoRepo,
-        PaymentMethodRepository paymentMethodRepo) { // user repo for ease of testing with a built-in user
+        PaymentMethodRepository paymentMethodRepo,
+        PaymentGateway paymentGateway) { // user repo for ease of testing with a built-in user
     
     return new CommandLineRunner() {
       @Override
       public void run(String... args) throws Exception {
-        Ingredient flourTortilla = saveAnIngredient("FLTO", "Flour Tortilla", Type.WRAP);
-        Ingredient cornTortilla = saveAnIngredient("COTO", "Corn Tortilla", Type.WRAP);
-        Ingredient groundBeef = saveAnIngredient("GRBF", "Ground Beef", Type.PROTEIN);
-        Ingredient carnitas = saveAnIngredient("CARN", "Carnitas", Type.PROTEIN);
-        Ingredient tomatoes = saveAnIngredient("TMTO", "Diced Tomatoes", Type.VEGGIES);
-        Ingredient lettuce = saveAnIngredient("LETC", "Lettuce", Type.VEGGIES);
-        Ingredient cheddar = saveAnIngredient("CHED", "Cheddar", Type.CHEESE);
-        Ingredient jack = saveAnIngredient("JACK", "Monterrey Jack", Type.CHEESE);
-        Ingredient salsa = saveAnIngredient("SLSA", "Salsa", Type.SAUCE);
-        Ingredient sourCream = saveAnIngredient("SRCR", "Sour Cream", Type.SAUCE);
+        Ingredient flourTortilla = saveAnIngredient("FLTO", "Flour Tortilla", Type.WRAP, "0.75");
+        Ingredient cornTortilla = saveAnIngredient("COTO", "Corn Tortilla", Type.WRAP, "0.65");
+        Ingredient groundBeef = saveAnIngredient("GRBF", "Ground Beef", Type.PROTEIN, "2.50");
+        Ingredient carnitas = saveAnIngredient("CARN", "Carnitas", Type.PROTEIN, "2.75");
+        Ingredient tomatoes = saveAnIngredient("TMTO", "Diced Tomatoes", Type.VEGGIES, "0.50");
+        Ingredient lettuce = saveAnIngredient("LETC", "Lettuce", Type.VEGGIES, "0.40");
+        Ingredient cheddar = saveAnIngredient("CHED", "Cheddar", Type.CHEESE, "0.90");
+        Ingredient jack = saveAnIngredient("JACK", "Monterrey Jack", Type.CHEESE, "0.95");
+        Ingredient salsa = saveAnIngredient("SLSA", "Salsa", Type.SAUCE, "0.30");
+        Ingredient sourCream = saveAnIngredient("SRCR", "Sour Cream", Type.SAUCE, "0.45");
         
 //        UserUDT u = new UserUDT(username, fullname, phoneNumber)
         
-        userRepo.save(new User("habuma", encoder.encode("password"), 
+        User habuma = new User("habuma", encoder.encode("password"), 
               "Craig Walls", "123 North Street", "Cross Roads", "TX", 
-              "76227", "123-123-1234", "craig@habuma.com"))
-          .subscribe(user -> {
-              paymentMethodRepo.save(new PaymentMethod(user, "4111111111111111", "321", "10/25")).subscribe();
-          });        
+              "76227", "123-123-1234", "craig@habuma.com");
+        habuma.setRole("ROLE_ADMIN");
+        userRepo.save(habuma)
+          .flatMap(user -> paymentGateway.tokenize("4111111111111111", "321", "10/25")
+              .flatMap(card -> paymentMethodRepo.save(
+                  new PaymentMethod(user, card.getPaymentToken(),
+                      card.getBrand(), card.getLast4(), card.getExpiration()))))
+          .subscribe();        
         
         Taco taco1 = new Taco();
         taco1.setId("TACO1");
@@ -66,8 +73,9 @@ public class DevelopmentConfig {
 
       }
 
-      private Ingredient saveAnIngredient(String id, String name, Type type) {
-        Ingredient ingredient = new Ingredient(id, name, type);
+      private Ingredient saveAnIngredient(String id, String name, Type type, String price) {
+        Ingredient ingredient = new Ingredient(id, name, type, new BigDecimal(price),
+            true, 100, 20);
         repo.save(ingredient).subscribe();
         return ingredient;
       }

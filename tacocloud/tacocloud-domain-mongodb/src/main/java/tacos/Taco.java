@@ -1,5 +1,6 @@
 package tacos;
 
+import java.math.BigDecimal;
 import java.util.Date;
 import java.util.List;
 
@@ -28,5 +29,18 @@ public class Taco {
   
   @Size(min=1, message="You must choose at least 1 ingredient")
   private List<Ingredient> ingredients;
+
+  // ------------------------------------------------------------------
+  // Order-line snapshot (TC-14). These fields are meaningful only when the
+  // taco is embedded in an order: they freeze how many units were bought and
+  // the price at purchase time, so later catalog changes never rewrite
+  // historical orders. Server-owned: never accepted from the client.
+  // ------------------------------------------------------------------
+
+  private int quantity = 1;
+
+  private BigDecimal unitPriceAtPurchase;
+
+  private BigDecimal subtotal;
 
 }

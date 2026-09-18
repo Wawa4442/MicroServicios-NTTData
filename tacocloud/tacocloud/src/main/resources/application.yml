@@ -23,6 +23,8 @@ taco:
 spring:
 # end::springBootAdminUri[]
 # end::springBootAdminCreds[]
+  main:
+    web-application-type: reactive
   application:
     name: taco-cloud
   data:

@@ -1,80 +1,77 @@
 package tacos.security;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.annotation
-             .authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.web
-             .builders.HttpSecurity;
-import org.springframework.security.config.annotation.web
-                        .configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web
-                        .configuration.WebSecurityConfigurerAdapter;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.config.annotation.web.reactive
+                                    .EnableWebFluxSecurity;
+import org.springframework.security.config.web.server
+                                    .ServerHttpSecurity;
+import org.springframework.security.crypto.factory
+                                    .PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.server.SecurityWebFilterChain;
 
-@SuppressWarnings("deprecation")
+/**
+ * Reactive, deny-by-default security configuration.
+ *
+ * <p>The default posture is {@code authenticated()}: every route must be
+ * explicitly granted. Roles are USER (the registered customer), KITCHEN (the
+ * kitchen gateway) and ADMIN (the operator). The password encoder is a
+ * delegating encoder so stored secrets carry the {@code {bcrypt}} prefix and
+ * plain-text "encoders" are no longer used anywhere.
+ */
 @Configuration
-@EnableWebSecurity
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
-  
-  @Autowired
-  private UserDetailsService userDetailsService;
-  
-  @Override
-  protected void configure(HttpSecurity http) throws Exception {
-    http
-      .authorizeRequests()
-        .antMatchers(HttpMethod.OPTIONS).permitAll() // needed for Angular/CORS
-        .antMatchers(HttpMethod.POST, "/api/ingredients").permitAll()
-        .antMatchers("/api/tacos/**", "/api/orders/**")
-            .permitAll()
-            //.access("hasRole('ROLE_USER')")
-        .antMatchers(HttpMethod.PATCH, "/api/ingredients").permitAll()
-        .antMatchers("/**").access("permitAll")
-        
+@EnableWebFluxSecurity
+public class SecurityConfig {
+
+  @Bean
+  public SecurityWebFilterChain securityWebFilterChain(
+      ServerHttpSecurity http) {
+    return http
+      .authorizeExchange(exchanges -> exchanges
+        // SPA/CORS support: preflight is always allowed.
+        .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+        // Public pages and static assets.
+        .pathMatchers("/", "/index.html", "/favicon.ico",
+            "/login", "/register", "/register/**",
+            "/assets/**", "/webjars/**",
+            "/*.js", "/*.css", "/*.ico", "/*.map",
+            "/*.png", "/*.jpg", "/*.svg", "/*.woff2",
+            "/actuator/health").permitAll()
+        // Kitchen consumes recent orders through a dedicated gateway.
+        .pathMatchers("/api/kitchen/**").hasRole("KITCHEN")
+        // Operator-only catalog and inventory administration.
+        .pathMatchers("/api/admin/**").hasRole("ADMIN")
+        // Order lifecycle belongs to customers, the kitchen and operators;
+        // rule-based ownership is enforced in OrderApiService.
+        .pathMatchers("/api/orders/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
+        // The catalog can be read by any authenticated principal (the SPA
+        // needs it to design tacos) but only administered by operators.
+        .pathMatchers(HttpMethod.GET, "/api/ingredients/**")
+            .hasAnyRole("USER", "KITCHEN", "ADMIN")
+        .pathMatchers(HttpMethod.GET, "/api/tacos/**")
+            .hasAnyRole("USER", "KITCHEN")
+        .pathMatchers("/api/ingredients/**").hasRole("ADMIN")
+        .pathMatchers("/api/tacos/**").hasRole("ADMIN")
+        // Legacy Data REST and management endpoints are operator-only.
+        .pathMatchers("/data-api/**").hasRole("ADMIN")
+        .pathMatchers("/actuator/**").hasRole("ADMIN")
+        // Everything else requires an authenticated principal.
+        .anyExchange().authenticated())
+      .httpBasic()
       .and()
         .formLogin()
-          .loginPage("/login")
-          
       .and()
-        .httpBasic()
-          .realmName("Taco Cloud")
-          
-      .and()
-        .logout()
-          .logoutSuccessUrl("/")
-          
-      .and()
-        .csrf()
-          .ignoringAntMatchers("/h2-console/**", "/api/**")
-
-      // Allow pages to be loaded in frames from the same origin; needed for H2-Console
-      .and()  
-        .headers()
-          .frameOptions()
-            .sameOrigin()
-      ;
+        .csrf().disable()
+      .build();
   }
 
   @Bean
-  public PasswordEncoder encoder() {
-//    return new StandardPasswordEncoder("53cr3t");
-    return NoOpPasswordEncoder.getInstance();
-  }
-  
-  
-  @Override
-  protected void configure(AuthenticationManagerBuilder auth)
-      throws Exception {
-
-    auth
-      .userDetailsService(userDetailsService)
-      .passwordEncoder(encoder());
-    
+  public PasswordEncoder passwordEncoder() {
+    // Delegating encoder: verification supports {bcrypt}, {noop}, ... while
+    // new passwords are always hashed as {bcrypt}. NoOpPasswordEncoder is gone.
+    return PasswordEncoderFactories.createDelegatingPasswordEncoder();
   }
 
 }

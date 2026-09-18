@@ -3,6 +3,7 @@ import java.util.Arrays;
 import java.util.Collection;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.
@@ -25,6 +26,7 @@ public class User implements UserDetails {
   @Id
   private String id;
   
+  @Indexed(unique=true)
   private final String username;
   
   private final String password;
@@ -34,11 +36,17 @@ public class User implements UserDetails {
   private final String state;
   private final String zip;
   private final String phoneNumber;
+
+  @Indexed(unique=true)
   private final String email;
-  
+
+  /** Spring Security role stored without the ROLE_ prefix conventions
+   *  applied at authority time; defaults to the ordinary USER role. */
+  private String role = "ROLE_USER";
+
   @Override
   public Collection<? extends GrantedAuthority> getAuthorities() {
-    return Arrays.asList(new SimpleGrantedAuthority("ROLE_USER"));
+    return Arrays.asList(new SimpleGrantedAuthority(role));
   }
 
   @Override
