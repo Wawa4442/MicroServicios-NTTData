@@ -3,6 +3,7 @@ package tacos.web.api;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import javax.validation.Valid;
 
@@ -30,6 +31,7 @@ import reactor.core.publisher.Mono;
 import tacos.User;
 import tacos.api.dto.OrderCreateRequest;
 import tacos.api.dto.OrderMapper;
+import tacos.api.dto.OrderQuoteResponse;
 import tacos.api.dto.OrderResponse;
 import tacos.data.OrderRepository;
 import tacos.messaging.OrderMessagingService;
@@ -84,9 +86,20 @@ public class OrderApiController {
   @ResponseStatus(HttpStatus.CREATED)
   public Mono<OrderResponse> postOrderFromEmail(@RequestBody Mono<EmailOrder> emailOrder) {
     return emailOrderService.convertEmailOrderToDomainOrder(emailOrder)
-        .flatMap(repo::save)
+        .map(order -> {
+          order.setReservationKey(UUID.randomUUID().toString());
+          return order;
+        })
+        .flatMap(orderService::persistAssembledOrder)
         .flatMap(saved -> orderMessages.sendOrderReactive(saved).thenReturn(saved))
         .map(OrderResponse::from);
+  }
+
+  @PostMapping(path="quote", consumes="application/json")
+  public Mono<OrderQuoteResponse> quoteOrder(
+      @RequestBody @Valid OrderCreateRequest request) {
+    return caller()
+        .flatMap(caller -> orderService.quoteOrder(request, caller));
   }
 
   @PatchMapping(path="/{orderId}", consumes="application/json")

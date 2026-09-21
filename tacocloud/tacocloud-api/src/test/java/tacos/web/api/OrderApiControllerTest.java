@@ -1,6 +1,9 @@
 package tacos.web.api;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -9,7 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import org.mockito.stubbing.Answer;
+
+import java.math.BigDecimal;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -30,13 +37,22 @@ import tacos.Ingredient;
 import tacos.TacoOrder;
 import tacos.User;
 import tacos.api.dto.OrderMapper;
+import tacos.coupon.CouponDecision;
+import tacos.coupon.CouponEngine;
+import tacos.coupon.CouponNotApplicableException;
+import tacos.coupon.CouponStatus;
 import tacos.data.IngredientRepository;
 import tacos.data.OrderRepository;
 import tacos.data.PaymentMethodRepository;
 import tacos.data.UserRepository;
+import tacos.inventory.InventoryService;
+import tacos.inventory.StockReservation;
 import tacos.messaging.OrderMessagingService;
 import tacos.pricing.PricingProperties;
 import tacos.pricing.PricingService;
+import tacos.rules.RuleViolation;
+import tacos.rules.TacoDesignInvalidException;
+import tacos.rules.TacoValidator;
 
 public class OrderApiControllerTest {
 
@@ -52,6 +68,9 @@ public class OrderApiControllerTest {
   private OrderApiService orderService;
   private OrderMapper orderMapper;
   private PricingService pricing;
+  private CouponEngine coupons;
+  private TacoValidator validator;
+  private InventoryService inventory;
   private WebTestClient client;
 
   @BeforeEach
@@ -64,7 +83,21 @@ public class OrderApiControllerTest {
     emailService = Mockito.mock(EmailOrderService.class);
     orderMapper = new OrderMapper();
     pricing = new PricingService(new PricingProperties());
-    orderService = new OrderApiService(repo, ingredientRepo, userRepo, paymentMethodRepo, orderMapper, pricing);
+    coupons = Mockito.mock(CouponEngine.class);
+    validator = Mockito.mock(TacoValidator.class);
+    inventory = Mockito.mock(InventoryService.class);
+    orderService = new OrderApiService(repo, ingredientRepo, userRepo,
+        paymentMethodRepo, orderMapper, pricing, coupons, validator, inventory);
+    // The controller-level tests focus on wiring and contracts: the Taco
+    // Physics, coupon and inventory engines are mocked here and tested in
+    // their own suites. A real engine would reject the single-ingredient
+    // fixtures used by the TC-04..TC-09 scenarios.
+    when(inventory.reserve(anyString(), anyList()))
+        .thenAnswer(inv -> Mono.just(StockReservation.created(
+            inv.getArgument(0), inv.getArgument(1))));
+    when(inventory.confirm(anyString(), anyString())).thenReturn(Mono.empty());
+    when(inventory.release(anyString())).thenReturn(Mono.empty());
+    when(inventory.releaseForOrder(anyString())).thenReturn(Mono.empty());
     // Emulates the reactive default method without invoking the real one on the mock.
     when(messages.sendOrderReactive(any(TacoOrder.class))).thenAnswer(inv -> {
       messages.sendOrder(inv.getArgument(0));
@@ -346,7 +379,7 @@ public class OrderApiControllerTest {
 
   @Test
   public void tc07_post_orderIsSavedThenPublishedExactlyOnce() {
-    when(repo.save(any(TacoOrder.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
     client.post().uri("/api/orders")
         .contentType(MediaType.APPLICATION_JSON)
@@ -376,7 +409,7 @@ public class OrderApiControllerTest {
   public void tc07_fromEmail_orderIsSavedThenPublishedExactlyOnce() {
     when(emailService.convertEmailOrderToDomainOrder(any()))
         .thenReturn(Mono.just(order(ALICE)));
-    when(repo.save(any(TacoOrder.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
     client.post().uri("/api/orders/fromEmail")
         .contentType(MediaType.APPLICATION_JSON)
@@ -429,7 +462,7 @@ public class OrderApiControllerTest {
           .doOnSubscribe(s -> subscriptions.incrementAndGet())
           .map(email -> order(ALICE));
     });
-    when(repo.save(any(TacoOrder.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
     OrderApiController controller =
         new OrderApiController(repo, messages, emailService, orderService, orderMapper, new ObjectMapper());
@@ -450,7 +483,7 @@ public class OrderApiControllerTest {
 
   @Test
   public void tc08_post_cannotFixServerOwnedFields() {
-    when(repo.save(any(TacoOrder.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
     client.post().uri("/api/orders")
         .contentType(MediaType.APPLICATION_JSON)
@@ -484,7 +517,7 @@ public class OrderApiControllerTest {
 
   @Test
   public void tc14_quantityTwo_doublesLineSubtotal_andClientTotalsAreIgnored() {
-    when(repo.save(any(TacoOrder.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
     client.post().uri("/api/orders")
         .contentType(MediaType.APPLICATION_JSON)
@@ -536,6 +569,81 @@ public class OrderApiControllerTest {
         .jsonPath("$.code").isEqualTo("invalid_quantity");
 
     verify(repo, never()).save(any(TacoOrder.class));
+  }
+
+  // =====================================================================
+  // TC-15/TC-18: coupons, quote and the design validator before any side effect
+  // =====================================================================
+
+  @Test
+  public void tc15_quote_computesServerSideMoney_withoutPersistingOrReserving() {
+    when(coupons.apply(any(BigDecimal.class), anyString()))
+        .thenReturn(CouponDecision.applied("WELCOME10", new BigDecimal("0.20")));
+
+    client.post().uri("/api/orders/quote")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{\"deliveryName\":\"Alice\",\"deliveryStreet\":\"1 Oak\","
+            + "\"deliveryCity\":\"Austin\",\"deliveryState\":\"TX\","
+            + "\"deliveryZip\":\"78701\","
+            + "\"couponCode\":\"welcome10\","
+            + "\"tacos\":[{\"name\":\"Test Taco\",\"ingredientIds\":[\"FLTO\"],"
+            + "\"quantity\":2,\"unitPrice\":\"9.99\"}]}")
+        .exchange()
+        .expectStatus().isOk()
+        .expectBody()
+        .jsonPath("$.currency").isEqualTo("USD")
+        .jsonPath("$.subtotal").isEqualTo(2.00)
+        .jsonPath("$.discount").isEqualTo(0.20)
+        .jsonPath("$.couponCode").isEqualTo("WELCOME10")
+        .jsonPath("$.total").isEqualTo(1.80);
+
+    verify(repo, never()).save(any(TacoOrder.class));
+    verify(inventory, never()).reserve(anyString(), anyList());
+  }
+
+  @Test
+  public void tc15_couponNotApplicable_returns422Problem_noSaveNoReserve() {
+    when(coupons.apply(any(BigDecimal.class), anyString()))
+        .thenThrow(new CouponNotApplicableException(CouponDecision.rejected(
+            CouponStatus.EXPIRED, "WELCOME10", "Coupon expired.")));
+
+    client.post().uri("/api/orders")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{\"deliveryName\":\"Alice\",\"deliveryStreet\":\"1 Oak\","
+            + "\"deliveryCity\":\"Austin\",\"deliveryState\":\"TX\","
+            + "\"deliveryZip\":\"78701\","
+            + "\"couponCode\":\"welcome10\","
+            + "\"tacos\":[{\"name\":\"Test Taco\",\"ingredientIds\":[\"FLTO\"]}]}")
+        .exchange()
+        .expectStatus().isEqualTo(422)
+        .expectBody()
+        .jsonPath("$.code").isEqualTo("coupon_not_applicable")
+        .jsonPath("$.detail").isEqualTo("EXPIRED: Coupon expired.");
+
+    verify(repo, never()).save(any(TacoOrder.class));
+    verify(inventory, never()).reserve(anyString(), anyList());
+  }
+
+  @Test
+  public void tc18_invalidTacoDesign_returns422Problem_noSaveNoReserve() {
+    doThrow(new TacoDesignInvalidException(List.of(RuleViolation.of(
+        "TOO_FEW_INGREDIENTS", "A taco needs at least 2 ingredients."))))
+        .when(validator).validateOrThrow(anyList());
+
+    client.post().uri("/api/orders")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{\"deliveryName\":\"Alice\",\"deliveryStreet\":\"1 Oak\","
+            + "\"deliveryCity\":\"Austin\",\"deliveryState\":\"TX\","
+            + "\"deliveryZip\":\"78701\","
+            + "\"tacos\":[{\"name\":\"Solo\",\"ingredientIds\":[\"FLTO\"]}]}")
+        .exchange()
+        .expectStatus().isEqualTo(422)
+        .expectBody()
+        .jsonPath("$.code").isEqualTo("taco_design_invalid")
+        .jsonPath("$.violations[0].field").isEqualTo("TOO_FEW_INGREDIENTS");
+
+    verify(repo, never()).save(any(TacoOrder.class));
+    verify(inventory, never()).reserve(anyString(), anyList());
   }
 
   // =====================================================================
@@ -668,6 +776,38 @@ public class OrderApiControllerTest {
   // =====================================================================
   // helpers
   // =====================================================================
+
+  /**
+   * Emulates the identity that MongoDB assigns on save: an order created
+   * without an id is returned in a new, still-empty-mutable copy that carries
+   * a generated id, without mutating the argument (tests capture the argument
+   * to assert on the pre-persistence state). This keeps the confirm step of the
+   * inventory flow able to link the reservation to the persisted order.
+   */
+  private Answer<Mono<TacoOrder>> idAssigningSave() {
+    return inv -> {
+      TacoOrder input = inv.getArgument(0);
+      TacoOrder saved = new TacoOrder();
+      saved.setId(input.getId() == null
+          ? "generated-" + System.nanoTime() : input.getId());
+      saved.setPlacedAt(input.getPlacedAt());
+      saved.setUser(input.getUser());
+      saved.setDeliveryName(input.getDeliveryName());
+      saved.setDeliveryStreet(input.getDeliveryStreet());
+      saved.setDeliveryCity(input.getDeliveryCity());
+      saved.setDeliveryState(input.getDeliveryState());
+      saved.setDeliveryZip(input.getDeliveryZip());
+      saved.setPaymentMethodId(input.getPaymentMethodId());
+      saved.setReservationKey(input.getReservationKey());
+      saved.setTacos(input.getTacos());
+      saved.setCurrency(input.getCurrency());
+      saved.setSubtotal(input.getSubtotal());
+      saved.setDiscount(input.getDiscount());
+      saved.setCouponCode(input.getCouponCode());
+      saved.setTotal(input.getTotal());
+      return Mono.just(saved);
+    };
+  }
 
   private WebTestClient authenticatedClient(User user) {
     UsernamePasswordAuthenticationToken auth =

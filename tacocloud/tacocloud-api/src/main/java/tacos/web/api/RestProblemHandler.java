@@ -15,7 +15,11 @@ import org.springframework.web.server.ServerWebExchange;
 
 import tacos.catalog.IngredientCatalogValidationException;
 import tacos.catalog.StockAdjustmentRejectedException;
+import tacos.coupon.CouponNotApplicableException;
+import tacos.inventory.InsufficientStockException;
 import tacos.pricing.InvalidQuantityException;
+import tacos.rules.RuleViolation;
+import tacos.rules.TacoDesignInvalidException;
 import tacos.web.api.ApiProblem.Violation;
 
 @RestControllerAdvice
@@ -57,6 +61,31 @@ public class RestProblemHandler {
       StockAdjustmentRejectedException e, ServerWebExchange exchange) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Insufficient stock",
         "insufficient_stock", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(InsufficientStockException.class)
+  public ResponseEntity<ApiProblem> handleInsufficientStock(
+      InsufficientStockException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Insufficient stock",
+        "insufficient_stock", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(CouponNotApplicableException.class)
+  public ResponseEntity<ApiProblem> handleCouponNotApplicable(
+      CouponNotApplicableException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Coupon not applicable",
+        "coupon_not_applicable", e.getStatus().name() + ": " + e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(TacoDesignInvalidException.class)
+  public ResponseEntity<ApiProblem> handleTacoDesignInvalid(
+      TacoDesignInvalidException e, ServerWebExchange exchange) {
+    List<Violation> violations = e.getViolations().stream()
+        .map(v -> new Violation(v.getCode(), v.getMessage()))
+        .collect(Collectors.toList());
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid taco design",
+        "taco_design_invalid", "The taco design violates one or more rules.",
+        violations, exchange);
   }
 
   @ExceptionHandler(IngredientCatalogValidationException.class)

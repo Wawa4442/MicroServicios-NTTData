@@ -40,4 +40,17 @@ public class OrderCreateRequest {
 
   private String paymentMethodId;
 
+  /**
+   * Optional coupon code (TC-15). The engine validates and normalizes it; a
+   * non-applicable code rejects the order instead of silently ignoring money.
+   */
+  private String couponCode;
+
+  /**
+   * Optional idempotency key for the inventory reservation (TC-16). When
+   * absent, the server generates one, so a client retry should send the same
+   * key to avoid a double reservation.
+   */
+  private String idempotencyKey;
+
 }

@@ -2,6 +2,7 @@ package tacos;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.EnumSet;
 
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
@@ -29,17 +30,43 @@ public class DevelopmentConfig {
     return new CommandLineRunner() {
       @Override
       public void run(String... args) throws Exception {
-        Ingredient flourTortilla = saveAnIngredient("FLTO", "Flour Tortilla", Type.WRAP, "0.75");
-        Ingredient cornTortilla = saveAnIngredient("COTO", "Corn Tortilla", Type.WRAP, "0.65");
-        Ingredient groundBeef = saveAnIngredient("GRBF", "Ground Beef", Type.PROTEIN, "2.50");
-        Ingredient carnitas = saveAnIngredient("CARN", "Carnitas", Type.PROTEIN, "2.75");
-        Ingredient tomatoes = saveAnIngredient("TMTO", "Diced Tomatoes", Type.VEGGIES, "0.50");
-        Ingredient lettuce = saveAnIngredient("LETC", "Lettuce", Type.VEGGIES, "0.40");
-        Ingredient cheddar = saveAnIngredient("CHED", "Cheddar", Type.CHEESE, "0.90");
-        Ingredient jack = saveAnIngredient("JACK", "Monterrey Jack", Type.CHEESE, "0.95");
-        Ingredient salsa = saveAnIngredient("SLSA", "Salsa", Type.SAUCE, "0.30");
-        Ingredient sourCream = saveAnIngredient("SRCR", "Sour Cream", Type.SAUCE, "0.45");
-        
+        Ingredient flourTortilla = saveAnIngredient("FLTO", "Flour Tortilla", Type.WRAP, "0.75",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN),
+            EnumSet.of(Allergen.GLUTEN), SpiceLevel.NONE);
+        Ingredient cornTortilla = saveAnIngredient("COTO", "Corn Tortilla", Type.WRAP, "0.65",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.NONE);
+        Ingredient groundBeef = saveAnIngredient("GRBF", "Ground Beef", Type.PROTEIN, "2.50",
+            EnumSet.noneOf(DietaryTag.class), EnumSet.of(Allergen.MEAT), SpiceLevel.NONE);
+        Ingredient carnitas = saveAnIngredient("CARN", "Carnitas", Type.PROTEIN, "2.75",
+            EnumSet.noneOf(DietaryTag.class), EnumSet.of(Allergen.MEAT), SpiceLevel.NONE);
+        Ingredient tomatoes = saveAnIngredient("TMTO", "Diced Tomatoes", Type.VEGGIES, "0.50",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.NONE);
+        Ingredient lettuce = saveAnIngredient("LETC", "Lettuce", Type.VEGGIES, "0.40",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.NONE);
+        Ingredient cheddar = saveAnIngredient("CHED", "Cheddar", Type.CHEESE, "0.90",
+            EnumSet.of(DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.of(Allergen.DAIRY), SpiceLevel.NONE);
+        Ingredient jack = saveAnIngredient("JACK", "Monterrey Jack", Type.CHEESE, "0.95",
+            EnumSet.of(DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.of(Allergen.DAIRY), SpiceLevel.NONE);
+        Ingredient salsa = saveAnIngredient("SLSA", "Salsa", Type.SAUCE, "0.30",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.MILD);
+        Ingredient sourCream = saveAnIngredient("SRCR", "Sour Cream", Type.SAUCE, "0.45",
+            EnumSet.of(DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.of(Allergen.DAIRY), SpiceLevel.NONE);
+        // Fun-rule ingredients (TC-18): referenced from tacos.physics config,
+        // never from code.
+        Ingredient ghostPepper = saveAnIngredient("GHPR", "Ghost Pepper", Type.VEGGIES, "1.20",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.EXTRA_HOT);
+        Ingredient horchata = saveAnIngredient("WATR", "Horchata", Type.VEGGIES, "0.20",
+            EnumSet.of(DietaryTag.VEGAN, DietaryTag.VEGETARIAN, DietaryTag.GLUTEN_FREE),
+            EnumSet.noneOf(Allergen.class), SpiceLevel.NONE);
+
 //        UserUDT u = new UserUDT(username, fullname, phoneNumber)
         
         User habuma = new User("habuma", encoder.encode("password"), 
@@ -71,11 +98,21 @@ public class DevelopmentConfig {
         taco3.setIngredients(Arrays.asList(flourTortilla, cornTortilla, tomatoes, lettuce, salsa));
         tacoRepo.save(taco3).subscribe();
 
+        Taco taco4 = new Taco();
+        taco4.setId("TACO4");
+        taco4.setName("Ghost Rider");
+        taco4.setIngredients(Arrays.asList(flourTortilla, ghostPepper, tomatoes, salsa, horchata));
+        tacoRepo.save(taco4).subscribe();
+
       }
 
-      private Ingredient saveAnIngredient(String id, String name, Type type, String price) {
+      private Ingredient saveAnIngredient(String id, String name, Type type, String price,
+          EnumSet<DietaryTag> dietaryTags, EnumSet<Allergen> allergens, SpiceLevel spice) {
         Ingredient ingredient = new Ingredient(id, name, type, new BigDecimal(price),
             true, 100, 20);
+        ingredient.setDietaryTags(dietaryTags);
+        ingredient.setAllergens(allergens);
+        ingredient.setSpice(spice);
         repo.save(ingredient).subscribe();
         return ingredient;
       }

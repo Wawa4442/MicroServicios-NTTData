@@ -38,6 +38,11 @@ public class TacoOrder implements Serializable {
    */
   private String paymentMethodId;
 
+  /**
+   * Idempotency key of the inventory reservation (TC-16). Lets a retry of the
+   * same demand recognize its own reservation and a deletion release it.
+   */
+  private String reservationKey;
 
   private List<Taco> tacos = new ArrayList<>();
 

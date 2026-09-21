@@ -46,6 +46,11 @@ public class SecurityConfig {
         // Order lifecycle belongs to customers, the kitchen and operators;
         // rule-based ownership is enforced in OrderApiService.
         .pathMatchers("/api/orders/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
+        // Coupon validation belongs to whoever is building an order.
+        .pathMatchers("/api/coupons/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
+        // Taco Physics design validation runs before any order is created.
+        .pathMatchers(HttpMethod.POST, "/api/tacos/validate")
+            .hasAnyRole("USER", "KITCHEN", "ADMIN")
         // The catalog can be read by any authenticated principal (the SPA
         // needs it to design tacos) but only administered by operators.
         .pathMatchers(HttpMethod.GET, "/api/ingredients/**")

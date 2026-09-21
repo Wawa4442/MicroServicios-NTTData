@@ -15,9 +15,12 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import tacos.Allergen;
+import tacos.DietaryTag;
 import tacos.Ingredient;
 import tacos.Ingredient.Type;
 import tacos.PaymentMethod;
+import tacos.SpiceLevel;
 import tacos.Taco;
 import tacos.TacoOrder;
 import tacos.User;
@@ -78,6 +81,61 @@ public class ContractSerializationTest {
     assertFalse(json.contains("status"), "request DTO exposes no status");
     assertFalse(json.contains("userId"), "request DTO exposes no user identity");
     assertEquals("Craig Walls", request.getDeliveryName());
+  }
+
+  @Test
+  public void orderCreateRequest_cannotSmuggleMoneyThrough() throws Exception {
+    // A client cannot pre-write its own price: subtotal, discount and total are
+    // ignored on the way in (TC-14/TC-15/TC-18). The couponCode below IS a
+    // legitimate client input: it is the code the customer typed, and the
+    // decision about it stays server-owned.
+    OrderCreateRequest request = JACKSON.readValue(
+        "{\"deliveryName\":\"Craig Walls\",\"deliveryCity\":\"Austin\","
+            + "\"subtotal\":0.01,\"discount\":1000.00,\"total\":0.00,\"couponCode\":\"HACK\","
+            + "\"tacos\":[{\"name\":\"Carnivore\",\"ingredientIds\":[\"FLTO\"]}]}",
+        OrderCreateRequest.class);
+
+    String json = JACKSON.writeValueAsString(request);
+    assertFalse(json.contains("subtotal"), "prices are computed on the server");
+    assertFalse(json.contains("discount"), "discounts are computed on the server");
+    assertFalse(json.contains("total"), "totals are computed on the server");
+    assertEquals("Craig Walls", request.getDeliveryName());
+    assertEquals("HACK", request.getCouponCode(),
+        "the coupon code input survives, but it is merely a proposal to the engine");
+  }
+
+  @Test
+  public void ingredientResponse_carriesDietaryMetadata() throws Exception {
+    Ingredient ghost = new Ingredient("GHPR", "Ghost Pepper", Type.VEGGIES);
+    ghost.setDietaryTags(Collections.singleton(DietaryTag.VEGAN));
+    ghost.setAllergens(Collections.singleton(Allergen.NUTS));
+    ghost.setSpice(SpiceLevel.EXTRA_HOT);
+
+    String json = JACKSON.writeValueAsString(INGREDIENT_MAPPER.toResponse(ghost));
+
+    assertTrue(json.contains("\"dietaryTags\":[\"VEGAN\"]"));
+    assertTrue(json.contains("\"allergens\":[\"NUTS\"]"));
+    assertTrue(json.contains("\"spice\":\"EXTRA_HOT\""));
+    assertTrue(json.contains("\"unitPrice\":0"));
+  }
+
+  @Test
+  public void orderQuoteResponse_isPureComputedMoney() throws Exception {
+    TacoOrder order = fullOrder();
+    order.setCurrency("USD");
+    order.setSubtotal(new java.math.BigDecimal("12.50"));
+    order.setDiscount(new java.math.BigDecimal("1.25"));
+    order.setTotal(new java.math.BigDecimal("11.25"));
+    order.setCouponCode("WELCOME10");
+
+    String json = JACKSON.writeValueAsString(OrderQuoteResponse.of(order));
+
+    assertTrue(json.contains("\"subtotal\":12.50"));
+    assertTrue(json.contains("\"discount\":1.25"));
+    assertTrue(json.contains("\"total\":11.25"));
+    assertTrue(json.contains("\"couponCode\":\"WELCOME10\""));
+    assertTrue(json.contains("\"currency\":\"USD\""));
+    assertFalse(json.contains("\"id\":\"order1\""), "a quote never leaks the order id");
   }
 
   @Test

@@ -35,3 +35,31 @@ spring:
     port: 61617
     user: tacoweb
     password: l3tm31n
+---
+# Business engine configuration (Laboratorio 3).
+# Coupons are data, not code (TC-15): promotions change here without a rebuild.
+tacos:
+  coupons:
+    coupons:
+      - code: WELCOME10
+        type: PERCENTAGE
+        value: 10
+        minSubtotal: 10.00
+        maxDiscount: 5.00
+        activeFrom: 2000-01-01
+        activeTo: 2099-12-31
+      - code: FLAT5
+        type: FIXED
+        value: 5.00
+        minSubtotal: 20.00
+        activeFrom: 2000-01-01
+        activeTo: 2099-12-31
+  # Taco Physics knob configuration (TC-18). Rule behaviour is data too: the
+  # ingredient ids referenced by the fun rules never appear in code.
+  physics:
+    min-ingredients: 2
+    max-ingredients: 12
+    ghost-pepper-ingredient-id: GHPR
+    drink-ingredient-ids:
+      - WATR
+    vegan-no-meat-enabled: true

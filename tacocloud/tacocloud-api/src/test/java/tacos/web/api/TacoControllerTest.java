@@ -16,9 +16,24 @@ import reactor.core.publisher.Mono;
 import tacos.Ingredient;
 import tacos.Ingredient.Type;
 import tacos.Taco;
+import tacos.classification.TacoClassificationService;
+import tacos.data.IngredientRepository;
 import tacos.data.TacoRepository;
+import tacos.rules.TacoValidator;
 
 public class TacoControllerTest {
+
+  private TacoRepository tacoRepo =
+      Mockito.mock(TacoRepository.class);
+  private IngredientRepository ingredientRepo =
+      Mockito.mock(IngredientRepository.class);
+  private TacoValidator validator = Mockito.mock(TacoValidator.class);
+  private TacoClassificationService classification =
+      Mockito.mock(TacoClassificationService.class);
+
+  private TacoController controller() {
+    return new TacoController(tacoRepo, ingredientRepo, validator, classification);
+  }
 
   @Test
   public void shouldReturnRecentTacos() {
@@ -33,11 +48,9 @@ public class TacoControllerTest {
         testTaco(15L), testTaco(16L)};
     Flux<Taco> tacoFlux = Flux.just(tacos);
 
-    TacoRepository tacoRepo = Mockito.mock(TacoRepository.class);
     when(tacoRepo.findAll()).thenReturn(tacoFlux);
 
-    WebTestClient testClient = WebTestClient.bindToController(
-        new TacoController(tacoRepo))
+    WebTestClient testClient = WebTestClient.bindToController(controller())
         .build();
 
     testClient.get().uri("/api/tacos?recent")
@@ -57,16 +70,13 @@ public class TacoControllerTest {
 
   @Test
   public void shouldSaveATaco() {
-    TacoRepository tacoRepo = Mockito.mock(
-                TacoRepository.class);
     Mono<Taco> unsavedTacoMono = Mono.just(testTaco(null));
     Taco savedTaco = testTaco(null);
     Mono<Taco> savedTacoMono = Mono.just(savedTaco);
 
     when(tacoRepo.save(any())).thenReturn(savedTacoMono);
 
-    WebTestClient testClient = WebTestClient.bindToController(
-        new TacoController(tacoRepo)).build();
+    WebTestClient testClient = WebTestClient.bindToController(controller()).build();
 
     testClient.post()
         .uri("/api/tacos")
