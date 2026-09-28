@@ -1,14 +1,15 @@
 # The values given here are actually the default values. But they are explicitly
 # set here as an example of setting the Artemis properties.
+# Credentials never live in Git (TC-28): they come from the environment.
 spring:
   jms:
     template:
-      default-destination: tacocloud.order.queue
+      default-destination: ${TACOCLOUD_JMS_DESTINATION:tacocloud.order.queue}
   artemis:
-    host: localhost
-    port: 61616
-    user: tacoweb
-    password: letm31n
+    host: ${ARTEMIS_HOST:localhost}
+    port: ${ARTEMIS_PORT:61616}
+    user: ${ARTEMIS_USER:tacoweb}
+    password: ${ARTEMIS_PASSWORD:}
     embedded:
       enabled: false
       
@@ -29,12 +30,12 @@ spring:
 # that will override the local configuration in the default profile.
 spring:
   profiles: production
-    
+
   artemis:
-    host: artemis.tacocloud.com
-    port: 61617
-    user: tacoweb
-    password: l3tm31n
+    host: ${ARTEMIS_HOST:artemis.tacocloud.com}
+    port: ${ARTEMIS_PORT:61617}
+    user: ${ARTEMIS_USER:tacoweb}
+    password: ${ARTEMIS_PASSWORD:}
 ---
 # Business engine configuration (Laboratorio 3).
 # Coupons are data, not code (TC-15): promotions change here without a rebuild.
@@ -63,3 +64,35 @@ tacos:
     drink-ingredient-ids:
       - WATR
     vegan-no-meat-enabled: true
+  # Kitchen queue tuning (TC-26): ETA terms and paging, data not code.
+  kitchen:
+    base-minutes: 5
+    per-taco-minutes: 2
+    per-ingredient-minutes: 0.5
+    per-queued-order-minutes: 1
+    default-page-size: 20
+    max-page-size: 100
+---
+# Reliable messaging (TC-28/TC-29/TC-30). The transport is chosen at
+# runtime via tacocloud.messaging.transport: noop|jms|rabbit|kafka.
+# No broker switch ever needs a rebuild, and no secret lives in Git.
+tacocloud:
+  messaging:
+    transport: ${TACOCLOUD_MESSAGING_TRANSPORT:noop}
+    jms:
+      destination: ${TACOCLOUD_JMS_DESTINATION:tacocloud.order.queue}
+    rabbit:
+      destination: ${TACOCLOUD_RABBIT_DESTINATION:tacocloud.order.queue}
+    kafka:
+      topic: ${TACOCLOUD_KAFKA_TOPIC:tacocloud.orders.topic}
+  outbox:
+    enabled: true
+    batch-size: 20
+    poll-interval: 5s
+    max-attempts: 8
+    base-backoff: 5s
+  consumer:
+    max-retries: 5
+    base-backoff: 2s
+    destination: ${TACOCLOUD_CONSUMER_DESTINATION:tacocloud.order.queue}
+    dead-letter-destination: ${TACOCLOUD_DLQ_DESTINATION:tacocloud.order.dlq}

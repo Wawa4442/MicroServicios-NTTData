@@ -6,6 +6,7 @@ import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import tacos.OrderStatus;
 import tacos.TacoOrder;
 import tacos.User;
 
@@ -41,5 +42,14 @@ public interface OrderRepository
    */
   @Query(value = "{}", sort = "{ 'placedAt': -1, '_id': -1 }")
   Flux<TacoOrder> findAllNewestFirst(Pageable pageable);
+
+  /**
+   * Kitchen queue (TC-26): orders waiting for a station, oldest first. The
+   * trailing {@code _id} keeps the FIFO stable when two orders share a
+   * {@code placedAt}, so paging never skips or repeats a row.
+   */
+  Flux<TacoOrder> findByStatusOrderByPlacedAtAscIdAsc(OrderStatus status, Pageable pageable);
+
+  Mono<Long> countByStatus(OrderStatus status);
 
 }

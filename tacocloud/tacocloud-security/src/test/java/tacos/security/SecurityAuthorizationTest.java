@@ -219,6 +219,49 @@ public class SecurityAuthorizationTest {
         .expectStatus(HttpStatus.OK);
   }
 
+  @Test
+  public void tc25_statusMovesBelongToCustomersKitchenAndOperators() {
+    // The lifecycle routes live under /api/orders/**, so every authenticated
+    // role reaches the handler; the workflow service (tested on its own)
+    // decides who may run which move.
+    exchange(HttpMethod.PATCH, "/api/orders/o-1/status", null)
+        .expectStatus(HttpStatus.UNAUTHORIZED);
+    exchange(HttpMethod.PATCH, "/api/orders/o-1/status", user("ROLE_USER"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.PATCH, "/api/orders/o-1/status", user("ROLE_KITCHEN"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.POST, "/api/orders/o-1/cancel", user("ROLE_USER"))
+        .expectStatus(HttpStatus.OK);
+  }
+
+  @Test
+  public void tc26_kitchenQueueIsForKitchenAndOperators() {
+    exchange(HttpMethod.GET, "/api/kitchen/queue", null)
+        .expectStatus(HttpStatus.UNAUTHORIZED);
+    exchange(HttpMethod.GET, "/api/kitchen/queue", user("ROLE_USER"))
+        .expectStatus(HttpStatus.FORBIDDEN);
+    exchange(HttpMethod.GET, "/api/kitchen/queue", user("ROLE_KITCHEN"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.GET, "/api/kitchen/queue", user("ROLE_ADMIN"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.POST, "/api/kitchen/queue/claim", user("ROLE_KITCHEN"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.POST, "/api/kitchen/queue/claim", user("ROLE_USER"))
+        .expectStatus(HttpStatus.FORBIDDEN);
+  }
+
+  @Test
+  public void tc30_deadLettersAreOperatorOnly() {
+    exchange(HttpMethod.GET, "/api/admin/dlq", user("ROLE_USER"))
+        .expectStatus(HttpStatus.FORBIDDEN);
+    exchange(HttpMethod.GET, "/api/admin/dlq", user("ROLE_KITCHEN"))
+        .expectStatus(HttpStatus.FORBIDDEN);
+    exchange(HttpMethod.GET, "/api/admin/dlq", user("ROLE_ADMIN"))
+        .expectStatus(HttpStatus.OK);
+    exchange(HttpMethod.GET, "/api/admin/dlq", null)
+        .expectStatus(HttpStatus.UNAUTHORIZED);
+  }
+
   private RequestAssert exchange(HttpMethod method, String path, User principal) {
     MockServerWebExchange exchange = MockServerWebExchange.from(
         MockServerHttpRequest.method(method, path).build());

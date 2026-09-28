@@ -7,7 +7,9 @@ import java.util.Date;
 import java.util.List;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import lombok.Data;
@@ -20,8 +22,12 @@ import lombok.Data;
  */
 @Data
 @Document
-@CompoundIndex(name = "order_user_placed_idx",
-    def = "{'user._id': 1, 'placedAt': -1, '_id': -1}")
+@CompoundIndexes({
+    @CompoundIndex(name = "order_user_placed_idx",
+        def = "{'user._id': 1, 'placedAt': -1, '_id': -1}"),
+    @CompoundIndex(name = "order_status_placed_idx",
+        def = "{'status': 1, 'placedAt': 1, '_id': 1}")
+})
 public class TacoOrder implements Serializable {
   private static final long serialVersionUID = 1L;
 
@@ -69,6 +75,36 @@ public class TacoOrder implements Serializable {
   private String couponCode;
 
   private BigDecimal total;
+
+  // ------------------------------------------------------------------
+  // Lifecycle (TC-25). The status is server-owned: OrderCreateRequest has
+  // no status field, and the only way to move it is OrderWorkflowService,
+  // which validates the transition matrix, the caller role and ownership.
+  // ------------------------------------------------------------------
+
+  private OrderStatus status = OrderStatus.CREATED;
+
+  /**
+   * Optimistic-locking revision. Two concurrent writers editing the same
+   * order collide with OptimisticLockingFailureException (mapped to 409)
+   * instead of silently overwriting each other.
+   */
+  @Version
+  private Long version;
+
+  /**
+   * Audit trail, oldest first. Each entry records who, when, through which
+   * channel and why; it never carries payment data or user objects.
+   */
+  private List<OrderStatusChange> statusHistory = new ArrayList<>();
+
+  /**
+   * Kitchen assignment (TC-26). Set atomically by the claim operation
+   * (findAndModify on CREATED), never by the customer.
+   */
+  private String stationId;
+
+  private String cookId;
 
   public void addTaco(Taco design) {
     this.tacos.add(design);

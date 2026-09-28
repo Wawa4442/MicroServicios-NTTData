@@ -11,12 +11,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,12 +25,19 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import reactor.core.publisher.Mono;
+import tacos.OrderStatus;
+import tacos.TacoOrder;
 import tacos.api.dto.OrderCreateRequest;
 import tacos.api.dto.OrderMapper;
 import tacos.api.dto.OrderQuoteResponse;
 import tacos.api.dto.OrderResponse;
 import tacos.data.OrderRepository;
-import tacos.messaging.OrderMessagingService;
+import tacos.messaging.OrderEventMapper;
+import tacos.outbox.OrderPlacementService;
+import tacos.outbox.OutboxService;
+import tacos.workflow.OrderCancelRequest;
+import tacos.workflow.OrderStatusChangeRequest;
+import tacos.workflow.OrderWorkflowService;
 
 @RestController
 @RequestMapping(path="/api/orders",
@@ -43,24 +50,33 @@ public class OrderApiController {
       "deliveryState", "deliveryZip");
 
   private final OrderRepository repo;
-  private final OrderMessagingService orderMessages;
   private final EmailOrderService emailOrderService;
   private final OrderApiService orderService;
+  private final OrderWorkflowService workflow;
+  private final OrderPlacementService placement;
+  private final OutboxService outbox;
+  private final OrderEventMapper events;
   private final OrderMapper orderMapper;
   private final ObjectMapper objectMapper;
   private final CallerIdentityResolver identities;
 
   public OrderApiController(OrderRepository repo,
-                            OrderMessagingService orderMessages,
                             EmailOrderService emailOrderService,
                             OrderApiService orderService,
+                            OrderWorkflowService workflow,
+                            OrderPlacementService placement,
+                            OutboxService outbox,
+                            OrderEventMapper events,
                             OrderMapper orderMapper,
                             ObjectMapper objectMapper,
                             CallerIdentityResolver identities) {
     this.repo = repo;
-    this.orderMessages = orderMessages;
     this.emailOrderService = emailOrderService;
     this.orderService = orderService;
+    this.workflow = workflow;
+    this.placement = placement;
+    this.outbox = outbox;
+    this.events = events;
     this.orderMapper = orderMapper;
     this.objectMapper = objectMapper;
     this.identities = identities;
@@ -75,23 +91,33 @@ public class OrderApiController {
   @PostMapping(consumes="application/json")
   @ResponseStatus(HttpStatus.CREATED)
   public Mono<OrderResponse> postOrder(
-      @RequestBody @Valid OrderCreateRequest request) {
+      @RequestBody @Valid OrderCreateRequest request,
+      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
+    String correlation = correlationId == null || correlationId.trim().isEmpty()
+        ? UUID.randomUUID().toString() : correlationId.trim();
     return caller()
-        .flatMap(caller -> orderService.createOrder(request, caller))
-        .flatMap(saved -> orderMessages.sendOrderReactive(saved).thenReturn(saved))
+        .flatMap(caller -> placement.placeOrder(request, caller, correlation))
         .map(OrderResponse::from);
   }
 
   @PostMapping(path="fromEmail", consumes="application/json")
   @ResponseStatus(HttpStatus.CREATED)
-  public Mono<OrderResponse> postOrderFromEmail(@RequestBody Mono<EmailOrder> emailOrder) {
+  public Mono<OrderResponse> postOrderFromEmail(
+      @RequestBody Mono<EmailOrder> emailOrder,
+      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
+    String correlation = correlationId == null || correlationId.trim().isEmpty()
+        ? UUID.randomUUID().toString() : correlationId.trim();
     return emailOrderService.convertEmailOrderToDomainOrder(emailOrder)
         .map(order -> {
           order.setReservationKey(UUID.randomUUID().toString());
+          if (order.getStatus() == null) {
+            order.setStatus(OrderStatus.CREATED);
+          }
           return order;
         })
         .flatMap(orderService::persistAssembledOrder)
-        .flatMap(saved -> orderMessages.sendOrderReactive(saved).thenReturn(saved))
+        .flatMap(saved -> outbox.append(events.toCreated(saved, correlation))
+            .thenReturn(saved))
         .map(OrderResponse::from);
   }
 
@@ -131,6 +157,71 @@ public class OrderApiController {
     return caller()
         .flatMap(caller -> orderService.deleteOrder(orderId, caller))
         .then(Mono.just(ResponseEntity.noContent().<Void>build()));
+  }
+
+  /**
+   * Advances the lifecycle of one order (TC-25). The matrix and the role
+   * check live in the workflow service; here we only resolve the caller and
+   * translate the body. A repeated transition is idempotent (200 with the
+   * stored order); an illegal jump is 409; a move the caller may not run is
+   * 401/403. The resulting event is registered in the outbox (TC-29) for
+   * reliable delivery instead of being sent inline.
+   */
+  @PatchMapping(path = "/{orderId}/status", consumes = "application/json")
+  public Mono<ResponseEntity<OrderResponse>> changeStatus(
+      @PathVariable("orderId") String orderId,
+      @RequestBody @Valid OrderStatusChangeRequest request,
+      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
+    String correlation = correlationId == null || correlationId.trim().isEmpty()
+        ? UUID.randomUUID().toString() : correlationId.trim();
+    return caller()
+        .flatMap(caller -> repo.findById(orderId)
+            .switchIfEmpty(Mono.error(new OrderNotFoundException(orderId)))
+            .flatMap(before -> {
+              OrderStatus previous = before.getStatus() == null
+                  ? OrderStatus.CREATED : before.getStatus();
+              return workflow.transition(
+                  orderId, request.getStatus(), caller, "API", request.getReason())
+                  .flatMap(saved -> {
+                    if (saved.getStatus() == previous) {
+                      return Mono.just(saved);
+                    }
+                    return outbox.append(events.toStatusChanged(
+                        saved, previous, correlation)).thenReturn(saved);
+                  });
+            }))
+        .map(saved -> ResponseEntity.ok(OrderResponse.from(saved)));
+  }
+
+  /**
+   * Owner-facing cancellation (TC-25): always targets CANCELLED through the
+   * same matrix, so "only while the kitchen has not started" is enforced in
+   * one place.
+   */
+  @PostMapping(path = "/{orderId}/cancel", consumes = "application/json")
+  public Mono<ResponseEntity<OrderResponse>> cancelOrder(
+      @PathVariable("orderId") String orderId,
+      @RequestBody(required = false) OrderCancelRequest request,
+      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
+    String reason = request == null ? null : request.getReason();
+    String correlation = correlationId == null || correlationId.trim().isEmpty()
+        ? UUID.randomUUID().toString() : correlationId.trim();
+    return caller()
+        .flatMap(caller -> repo.findById(orderId)
+            .switchIfEmpty(Mono.error(new OrderNotFoundException(orderId)))
+            .flatMap(before -> {
+              OrderStatus previous = before.getStatus() == null
+                  ? OrderStatus.CREATED : before.getStatus();
+              return workflow.cancel(orderId, caller, reason)
+                  .flatMap(saved -> {
+                    if (saved.getStatus() == previous) {
+                      return Mono.just(saved);
+                    }
+                    return outbox.append(events.toCancelled(
+                        saved, previous, correlation)).thenReturn(saved);
+                  });
+            }))
+        .map(saved -> ResponseEntity.ok(OrderResponse.from(saved)));
   }
 
   /**

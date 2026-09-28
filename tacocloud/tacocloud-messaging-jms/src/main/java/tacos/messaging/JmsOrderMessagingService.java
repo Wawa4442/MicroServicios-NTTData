@@ -1,33 +1,47 @@
 package tacos.messaging;
 
-import javax.jms.JMSException;
-import javax.jms.Message;
-
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jms.core.JmsTemplate;
 import org.springframework.stereotype.Service;
 
-import tacos.TacoOrder;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+/**
+ * JMS adapter (TC-27/TC-28). Carries the versioned {@link OrderEvent}, never
+ * a Mongo entity. The blocking {@code JmsTemplate} call is deferred onto
+ * {@code boundedElastic} so the event loop never blocks; the destination
+ * comes from configuration, not from a hardcoded string.
+ */
 @Service
+@ConditionalOnProperty(name = "tacocloud.messaging.transport", havingValue = "jms")
 public class JmsOrderMessagingService implements OrderMessagingService {
 
-  private JmsTemplate jms;
+  private final JmsTemplate jms;
+  private final String destination;
 
-  @Autowired
-  public JmsOrderMessagingService(JmsTemplate jms) {
+  public JmsOrderMessagingService(JmsTemplate jms,
+      @Value("${tacocloud.messaging.jms.destination:tacocloud.order.queue}") String destination) {
     this.jms = jms;
+    this.destination = destination;
   }
 
   @Override
-  public void sendOrder(TacoOrder order) {
-    jms.convertAndSend("tacocloud.order.queue", order,
-        this::addOrderSource);
-  }
-  
-  private Message addOrderSource(Message message) throws JMSException {
-    message.setStringProperty("X_ORDER_SOURCE", "WEB");
-    return message;
+  public Mono<Void> sendEvent(OrderEvent event) {
+    return Mono.fromRunnable(() ->
+        jms.convertAndSend(destination, event, message -> {
+          message.setStringProperty("X_ORDER_SOURCE", "WEB");
+          message.setStringProperty("X_EVENT_ID", event.getEventId());
+          message.setStringProperty("X_EVENT_TYPE", String.valueOf(event.getEventType()));
+          message.setStringProperty("X_EVENT_VERSION", event.getVersion());
+          if (event.getCorrelationId() != null) {
+            message.setStringProperty("X_CORRELATION_ID", event.getCorrelationId());
+          }
+          return message;
+        }))
+        .subscribeOn(Schedulers.boundedElastic())
+        .then();
   }
 
 }

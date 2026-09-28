@@ -27,6 +27,9 @@ import tacos.rules.RuleViolation;
 import tacos.rules.TacoDesignInvalidException;
 import tacos.search.InvalidTacoSearchException;
 import tacos.web.api.ApiProblem.Violation;
+import tacos.kitchen.KitchenQueueEmptyException;
+import tacos.workflow.InvalidOrderStatusException;
+import tacos.workflow.OrderStatusTransitionException;
 
 @RestControllerAdvice
 public class RestProblemHandler {
@@ -203,6 +206,31 @@ public class RestProblemHandler {
       ReorderPaymentMethodRequiredException e, ServerWebExchange exchange) {
     return problem(HttpStatus.BAD_REQUEST, "Payment method required",
         "reorder_payment_method_required", e.getMessage(), exchange);
+  }
+
+  // ------------------------------------------------------------------
+  // Laboratorio 5 — cocina y mensajeria confiable
+  // ------------------------------------------------------------------
+
+  @ExceptionHandler(OrderStatusTransitionException.class)
+  public ResponseEntity<ApiProblem> handleStatusTransition(
+      OrderStatusTransitionException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.CONFLICT, "Invalid status transition",
+        "invalid_status_transition", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(InvalidOrderStatusException.class)
+  public ResponseEntity<ApiProblem> handleInvalidStatus(
+      InvalidOrderStatusException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Invalid status",
+        "invalid_status", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(KitchenQueueEmptyException.class)
+  public ResponseEntity<ApiProblem> handleQueueEmpty(
+      KitchenQueueEmptyException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.NOT_FOUND, "Kitchen queue empty",
+        "kitchen_queue_empty", e.getMessage(), exchange);
   }
 
   @ExceptionHandler(DuplicateKeyException.class)

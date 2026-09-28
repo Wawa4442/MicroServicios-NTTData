@@ -40,7 +40,9 @@ public class SecurityConfig {
             "/*.png", "/*.jpg", "/*.svg", "/*.woff2",
             "/actuator/health").permitAll()
         // Kitchen consumes recent orders through a dedicated gateway.
-        .pathMatchers("/api/kitchen/**").hasRole("KITCHEN")
+        // Operators share it (TC-25/TC-26): an ADMIN advancing a stuck
+        // ticket is the same lifecycle move, not a different resource.
+        .pathMatchers("/api/kitchen/**").hasAnyRole("KITCHEN", "ADMIN")
         // Operator-only catalog and inventory administration.
         .pathMatchers("/api/admin/**").hasRole("ADMIN")
         // Laboratorio 4: a customer's own favorites and order history. The

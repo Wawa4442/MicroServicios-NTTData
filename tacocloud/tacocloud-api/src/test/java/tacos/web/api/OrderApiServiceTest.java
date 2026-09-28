@@ -236,4 +236,37 @@ public class OrderApiServiceTest {
 
   private static final java.math.BigDecimal ZERO = java.math.BigDecimal.ZERO;
 
+  // ------------------------------------------------------------------
+  // TC-25: physical deletion stops where the lifecycle starts.
+  // ------------------------------------------------------------------
+
+  @Test
+  public void tc25_deletePreparingOrder_isRejected409() {
+    tacos.TacoOrder preparing = new tacos.TacoOrder();
+    preparing.setId("o1");
+    preparing.setStatus(tacos.OrderStatus.PREPARING);
+    when(repo.findById("o1")).thenReturn(Mono.just(preparing));
+
+    StepVerifier.create(service.deleteOrder("o1", CallerIdentity.admin("boss")))
+        .expectError(tacos.workflow.OrderStatusTransitionException.class)
+        .verify();
+
+    verify(repo, never()).deleteById(anyString());
+  }
+
+  @Test
+  public void tc25_deleteCreatedOrder_stillWorks() {
+    tacos.TacoOrder created = new tacos.TacoOrder();
+    created.setId("o1");
+    created.setStatus(tacos.OrderStatus.CREATED);
+    when(repo.findById("o1")).thenReturn(Mono.just(created));
+    when(inventory.releaseForOrder(anyString())).thenReturn(Mono.empty());
+    when(repo.deleteById(anyString())).thenReturn(Mono.empty());
+
+    StepVerifier.create(service.deleteOrder("o1", CallerIdentity.admin("boss")))
+        .verifyComplete();
+
+    verify(repo).deleteById("o1");
+  }
+
 }

@@ -29,6 +29,7 @@
       <module>tacocloud-email</module>
       <module>tacocloud-jmx</module>
       <module>tacocloud-kitchen</module>
+      <module>tacocloud-messaging-contract</module>
       <module>tacocloud-messaging-jms</module>
       <module>tacocloud-messaging-kafka</module>
       <module>tacocloud-messaging-rabbitmq</module>

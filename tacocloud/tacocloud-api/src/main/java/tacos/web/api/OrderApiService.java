@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tacos.Ingredient;
+import tacos.OrderStatus;
 import tacos.PaymentMethod;
 import tacos.Taco;
 import tacos.TacoOrder;
@@ -130,16 +131,26 @@ public class OrderApiService {
 
   /**
    * Removes an order physically and releases its reservation. Existence and
-   * ownership are checked first; state-based cancellation is deferred to
-   * TC-25. The release is a guarded transition, so it only returns stock when
-   * the reservation was still pending.
+   * ownership are checked first; an order that the kitchen already started
+   * (PREPARING or later, except CANCELLED) is rejected with 409 so it is
+   * cancelled through the lifecycle instead of vanishing (TC-25).
    */
   public Mono<Void> deleteOrder(String orderId, CallerIdentity caller) {
     return repo.findById(orderId)
         .switchIfEmpty(Mono.error(new OrderNotFoundException(orderId)))
         .flatMap(order -> requireAccess(order, caller))
-        .flatMap(order -> inventory.releaseForOrder(orderId)
-            .then(repo.deleteById(order.getId())));
+        .flatMap(order -> {
+          OrderStatus status = order.getStatus() == null
+              ? OrderStatus.CREATED : order.getStatus();
+          if (status == OrderStatus.PREPARING || status == OrderStatus.READY
+              || status == OrderStatus.OUT_FOR_DELIVERY
+              || status == OrderStatus.DELIVERED) {
+            return Mono.error(new tacos.workflow.OrderStatusTransitionException(
+                "Order in status " + status + " cannot be deleted; cancel it instead."));
+          }
+          return inventory.releaseForOrder(order.getId())
+              .then(repo.deleteById(order.getId()));
+        });
   }
 
   /**

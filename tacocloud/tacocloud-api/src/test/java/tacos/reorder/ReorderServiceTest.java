@@ -45,6 +45,10 @@ import tacos.web.api.OrderAccessDeniedException;
 import tacos.web.api.OrderApiService;
 import tacos.web.api.OrderNotFoundException;
 import tacos.web.api.UnknownIngredientException;
+import tacos.messaging.OrderEvent;
+import tacos.messaging.OrderEventMapper;
+import tacos.outbox.OutboxEvent;
+import tacos.outbox.OutboxService;
 
 /**
  * TC-24: order it again, priced today.
@@ -65,13 +69,17 @@ public class ReorderServiceTest {
 
   private OrderRepository orders;
   private OrderApiService orderApi;
+  private OutboxService outbox;
   private ReorderService reorders;
 
   @BeforeEach
   public void setup() {
     orders = mock(OrderRepository.class);
     orderApi = mock(OrderApiService.class);
-    reorders = new ReorderService(orders, orderApi);
+    outbox = mock(OutboxService.class);
+    when(outbox.append(any(OrderEvent.class)))
+        .thenAnswer(inv -> Mono.just(new OutboxEvent()));
+    reorders = new ReorderService(orders, orderApi, outbox, new OrderEventMapper());
     when(orders.findById(any(String.class))).thenReturn(Mono.empty());
     when(orderApi.quoteOrder(any(OrderCreateRequest.class), any(CallerIdentity.class)))
         .thenReturn(Mono.empty());

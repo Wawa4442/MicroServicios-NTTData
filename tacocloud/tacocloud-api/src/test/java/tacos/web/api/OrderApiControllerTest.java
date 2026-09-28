@@ -47,7 +47,12 @@ import tacos.data.PaymentMethodRepository;
 import tacos.data.UserRepository;
 import tacos.inventory.InventoryService;
 import tacos.inventory.StockReservation;
-import tacos.messaging.OrderMessagingService;
+import tacos.messaging.OrderEvent;
+import tacos.messaging.OrderEventMapper;
+import tacos.outbox.OrderPlacementService;
+import tacos.outbox.OutboxEvent;
+import tacos.outbox.OutboxService;
+import tacos.workflow.OrderWorkflowService;
 import tacos.pricing.PricingProperties;
 import tacos.pricing.PricingService;
 import tacos.rules.RuleViolation;
@@ -63,7 +68,10 @@ public class OrderApiControllerTest {
   private IngredientRepository ingredientRepo;
   private UserRepository userRepo;
   private PaymentMethodRepository paymentMethodRepo;
-  private OrderMessagingService messages;
+  private OutboxService outbox;
+  private OrderPlacementService placement;
+  private OrderWorkflowService workflow;
+  private OrderEventMapper events;
   private EmailOrderService emailService;
   private OrderApiService orderService;
   private OrderMapper orderMapper;
@@ -80,7 +88,7 @@ public class OrderApiControllerTest {
     ingredientRepo = Mockito.mock(IngredientRepository.class);
     userRepo = Mockito.mock(UserRepository.class);
     paymentMethodRepo = Mockito.mock(PaymentMethodRepository.class);
-    messages = Mockito.mock(OrderMessagingService.class);
+    outbox = Mockito.mock(OutboxService.class);
     emailService = Mockito.mock(EmailOrderService.class);
     orderMapper = new OrderMapper();
     pricing = new PricingService(new PricingProperties());
@@ -89,6 +97,9 @@ public class OrderApiControllerTest {
     inventory = Mockito.mock(InventoryService.class);
     orderService = new OrderApiService(repo, ingredientRepo, userRepo,
         paymentMethodRepo, orderMapper, pricing, coupons, validator, inventory);
+    events = new OrderEventMapper();
+    workflow = new OrderWorkflowService(repo);
+    placement = new OrderPlacementService(orderService, outbox, events);
     // The controller-level tests focus on wiring and contracts: the Taco
     // Physics, coupon and inventory engines are mocked here and tested in
     // their own suites. A real engine would reject the single-ingredient
@@ -99,11 +110,10 @@ public class OrderApiControllerTest {
     when(inventory.confirm(anyString(), anyString())).thenReturn(Mono.empty());
     when(inventory.release(anyString())).thenReturn(Mono.empty());
     when(inventory.releaseForOrder(anyString())).thenReturn(Mono.empty());
-    // Emulates the reactive default method without invoking the real one on the mock.
-    when(messages.sendOrderReactive(any(TacoOrder.class))).thenAnswer(inv -> {
-      messages.sendOrder(inv.getArgument(0));
-      return Mono.empty();
-    });
+    // Outbox registration (TC-29): creation commits order + NEW row locally;
+    // the relay delivers afterwards, so the controller never calls a broker.
+    when(outbox.append(any(OrderEvent.class)))
+        .thenAnswer(inv -> Mono.just(new OutboxEvent()));
     when(ingredientRepo.<Ingredient>findById("FLTO"))
         .thenReturn(Mono.just(new Ingredient("FLTO", "Flour Tortilla", Ingredient.Type.WRAP)));
     client = WebTestClient.bindToController(orderController())
@@ -118,7 +128,8 @@ public class OrderApiControllerTest {
    */
   private OrderApiController orderController() {
     identities = new CallerIdentityResolver();
-    return new OrderApiController(repo, messages, emailService, orderService, orderMapper,
+    return new OrderApiController(repo, emailService, orderService, workflow,
+        placement, outbox, events, orderMapper,
         new ObjectMapper(), identities);
   }
 
@@ -385,7 +396,8 @@ public class OrderApiControllerTest {
   }
 
   // =====================================================================
-  // TC-07: single subscription that saves and then publishes exactly once
+  // TC-07: single subscription that saves and then registers the outbox row
+  // (TC-29 keeps the guarantee: the relay publishes, the request commits).
   // =====================================================================
 
   @Test
@@ -399,7 +411,7 @@ public class OrderApiControllerTest {
         .expectStatus().isCreated();
 
     verify(repo).save(any(TacoOrder.class));
-    verify(messages, times(1)).sendOrder(any(TacoOrder.class));
+    verify(outbox, times(1)).append(any(OrderEvent.class));
   }
 
   @Test
@@ -413,7 +425,7 @@ public class OrderApiControllerTest {
         .exchange()
         .expectStatus().is5xxServerError();
 
-    verify(messages, never()).sendOrder(any(TacoOrder.class));
+    verify(outbox, never()).append(any(OrderEvent.class));
   }
 
   @Test
@@ -429,7 +441,7 @@ public class OrderApiControllerTest {
         .expectStatus().isCreated();
 
     verify(repo).save(any(TacoOrder.class));
-    verify(messages, times(1)).sendOrder(any(TacoOrder.class));
+    verify(outbox, times(1)).append(any(OrderEvent.class));
   }
 
   @Test
@@ -445,7 +457,7 @@ public class OrderApiControllerTest {
         .exchange()
         .expectStatus().is5xxServerError();
 
-    verify(messages, never()).sendOrder(any(TacoOrder.class));
+    verify(outbox, never()).append(any(OrderEvent.class));
   }
 
   @Test
@@ -460,7 +472,7 @@ public class OrderApiControllerTest {
         .expectStatus().isEqualTo(422);
 
     verify(repo, never()).save(any(TacoOrder.class));
-    verify(messages, never()).sendOrder(any(TacoOrder.class));
+    verify(outbox, never()).append(any(OrderEvent.class));
   }
 
   @Test
@@ -478,13 +490,13 @@ public class OrderApiControllerTest {
     OrderApiController controller = orderController();
     EmailOrder email = new EmailOrder();
 
-    StepVerifier.create(controller.postOrderFromEmail(Mono.just(email)))
+    StepVerifier.create(controller.postOrderFromEmail(Mono.just(email), null))
         .expectNextCount(1)
         .verifyComplete();
 
     assertEquals(1, subscriptions.get(),
         "the inbound request publisher must be subscribed exactly once");
-    verify(messages, times(1)).sendOrder(any(TacoOrder.class));
+    verify(outbox, times(1)).append(any(OrderEvent.class));
   }
 
   // =====================================================================
@@ -693,7 +705,7 @@ public class OrderApiControllerTest {
         .expectStatus().isBadRequest();
 
     verify(repo, never()).save(any(TacoOrder.class));
-    verify(messages, never()).sendOrder(any(TacoOrder.class));
+    verify(outbox, never()).append(any(OrderEvent.class));
   }
 
   @Test
@@ -762,7 +774,7 @@ public class OrderApiControllerTest {
         .jsonPath("$.code").isEqualTo("conflict")
         .jsonPath("$.status").isEqualTo(409);
 
-    verify(messages, never()).sendOrder(any(TacoOrder.class));
+    verify(outbox, never()).append(any(OrderEvent.class));
   }
 
   @Test
@@ -815,6 +827,11 @@ public class OrderApiControllerTest {
       saved.setDiscount(input.getDiscount());
       saved.setCouponCode(input.getCouponCode());
       saved.setTotal(input.getTotal());
+      saved.setStatus(input.getStatus());
+      saved.setVersion(input.getVersion());
+      saved.setStatusHistory(input.getStatusHistory());
+      saved.setStationId(input.getStationId());
+      saved.setCookId(input.getCookId());
       return Mono.just(saved);
     };
   }

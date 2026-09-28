@@ -5,6 +5,7 @@ import java.util.Date;
 import java.util.List;
 
 import lombok.Value;
+import tacos.OrderStatus;
 import tacos.TacoOrder;
 
 /**
@@ -28,6 +29,8 @@ public class OrderResponse {
   private final BigDecimal discount;
   private final String couponCode;
   private final BigDecimal total;
+  private final OrderStatus status;
+  private final Long version;
 
   public static OrderResponse from(TacoOrder order) {
     List<TacoLineResponse> lines = order.getTacos() == null
@@ -39,7 +42,9 @@ public class OrderResponse {
         order.getDeliveryName(), order.getDeliveryStreet(),
         order.getDeliveryCity(), order.getDeliveryState(), order.getDeliveryZip(),
         lines, order.getCurrency(), order.getSubtotal(), order.getDiscount(),
-        order.getCouponCode(), order.getTotal());
+        order.getCouponCode(), order.getTotal(),
+        order.getStatus() == null ? OrderStatus.CREATED : order.getStatus(),
+        order.getVersion());
   }
 
 }

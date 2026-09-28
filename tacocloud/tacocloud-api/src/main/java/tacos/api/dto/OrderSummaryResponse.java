@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 
 import lombok.Value;
 
+import tacos.OrderStatus;
 import tacos.Taco;
 import tacos.TacoOrder;
 
@@ -28,6 +29,7 @@ public class OrderSummaryResponse {
   private final int tacoCount;
   private final String currency;
   private final BigDecimal total;
+  private final OrderStatus status;
 
   public static OrderSummaryResponse from(TacoOrder order) {
     List<Taco> lines = order.getTacos() == null ? List.of() : order.getTacos();
@@ -36,7 +38,8 @@ public class OrderSummaryResponse {
             .filter(line -> line != null)
             .map(Taco::getName)
             .collect(Collectors.toList()),
-        lines.size(), order.getCurrency(), order.getTotal());
+        lines.size(), order.getCurrency(), order.getTotal(),
+        order.getStatus() == null ? OrderStatus.CREATED : order.getStatus());
   }
 
 }

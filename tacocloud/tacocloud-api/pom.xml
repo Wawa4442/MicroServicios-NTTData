@@ -41,24 +41,35 @@
 		</dependency>
 		<dependency>
 			<groupId>sia</groupId>
+			<artifactId>tacocloud-messaging-contract</artifactId>
+			<version>${tacocloud.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>sia</groupId>
 			<artifactId>tacocloud-messaging-noop</artifactId>
 			<version>${tacocloud.version}</version>
 		</dependency>
-<!--  		<dependency>
+		<!-- Runtime transports (TC-28): optional so unit tests boot without a
+		     broker, selectable via tacocloud.messaging.transport without
+		     editing this POM. -->
+		<dependency>
 			<groupId>sia</groupId>
 			<artifactId>tacocloud-messaging-jms</artifactId>
 			<version>${tacocloud.version}</version>
-		</dependency> -->
- 		<!-- <dependency>
+			<optional>true</optional>
+		</dependency>
+		<dependency>
 			<groupId>sia</groupId>
 			<artifactId>tacocloud-messaging-rabbitmq</artifactId>
 			<version>${tacocloud.version}</version>
-		</dependency> -->
-<!--   		<dependency>
+			<optional>true</optional>
+		</dependency>
+		<dependency>
 			<groupId>sia</groupId>
 			<artifactId>tacocloud-messaging-kafka</artifactId>
 			<version>${tacocloud.version}</version>
-		</dependency> -->
+			<optional>true</optional>
+		</dependency>
 
 		<!-- Necessary Boot starters -->
 		<dependency>
@@ -93,10 +104,6 @@
 			<scope>test</scope>
 		</dependency>
 
-		<!-- <dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-artemis</artifactId>
-		</dependency> -->
 	</dependencies>
 
 </project>

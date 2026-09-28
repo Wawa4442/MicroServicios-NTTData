@@ -19,6 +19,8 @@ import tacos.api.dto.ReorderResponse;
 import tacos.api.dto.TacoLineRequest;
 import tacos.api.dto.TacoLineResponse;
 import tacos.data.OrderRepository;
+import tacos.messaging.OrderEventMapper;
+import tacos.outbox.OutboxService;
 import tacos.web.api.AuthenticationRequiredException;
 import tacos.web.api.CallerIdentity;
 import tacos.web.api.OrderAccessDeniedException;
@@ -61,10 +63,15 @@ public class ReorderService {
 
   private final OrderRepository orders;
   private final OrderApiService orderApi;
+  private final OutboxService outbox;
+  private final OrderEventMapper events;
 
-  public ReorderService(OrderRepository orders, OrderApiService orderApi) {
+  public ReorderService(OrderRepository orders, OrderApiService orderApi,
+                        OutboxService outbox, OrderEventMapper events) {
     this.orders = orders;
     this.orderApi = orderApi;
+    this.outbox = outbox;
+    this.events = events;
   }
 
   public Mono<ReorderResponse> reorder(String orderId, ReorderRequest request,
@@ -90,8 +97,10 @@ public class ReorderService {
                 source.getTotal(), quote, differences));
           }
           return orderApi.createOrder(replay, caller)
-              .map(created -> ReorderResponse.placed(source.getId(), source.getTotal(),
-                  quote, differences, OrderResponse.from(created)));
+              .flatMap(created -> outbox.append(
+                  events.toCreated(created, request.getIdempotencyKey()))
+                  .thenReturn(ReorderResponse.placed(source.getId(), source.getTotal(),
+                      quote, differences, OrderResponse.from(created))));
         });
   }
 

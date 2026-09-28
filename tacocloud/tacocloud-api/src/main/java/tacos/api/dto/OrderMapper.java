@@ -6,6 +6,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Component;
 
+import tacos.OrderStatus;
 import tacos.PaymentMethod;
 import tacos.Taco;
 import tacos.TacoOrder;
@@ -34,6 +35,7 @@ public class OrderMapper {
     order.setPlacedAt(new Date());
     order.setTacos(new ArrayList<>(tacos == null ? List.of() : tacos));
     order.setUser(user);
+    order.setStatus(OrderStatus.CREATED);
     applyPayment(order, payment);
     return order;
   }
@@ -52,6 +54,13 @@ public class OrderMapper {
     merged.setTacos(new ArrayList<>(tacos == null ? List.of() : tacos));
     merged.setPaymentMethodId(
         paymentOrNull != null ? paymentOrNull.getId() : existing.getPaymentMethodId());
+    // A replacement edits content, never the lifecycle: status, audit,
+    // version and kitchen assignment always survive a PUT.
+    merged.setStatus(existing.getStatus() == null ? OrderStatus.CREATED : existing.getStatus());
+    merged.setVersion(existing.getVersion());
+    merged.setStatusHistory(existing.getStatusHistory());
+    merged.setStationId(existing.getStationId());
+    merged.setCookId(existing.getCookId());
     return merged;
   }
 

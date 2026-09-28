@@ -73,9 +73,20 @@ public class CallerIdentityResolver {
       User user = (User) principal;
       boolean admin = user.getAuthorities().stream()
           .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+      boolean kitchen = user.getAuthorities().stream()
+          .anyMatch(a -> a.getAuthority().equals("ROLE_KITCHEN"));
       // An operator is still a person: keeping the id lets them use their own
       // favorites and history instead of being told they are anonymous.
-      return admin ? CallerIdentity.admin(user.getId()) : CallerIdentity.user(user.getId());
+      if (admin && kitchen) {
+        return CallerIdentity.adminKitchen(user.getId());
+      }
+      if (admin) {
+        return CallerIdentity.admin(user.getId());
+      }
+      if (kitchen) {
+        return CallerIdentity.kitchen(user.getId());
+      }
+      return CallerIdentity.user(user.getId());
     }
     return CallerIdentity.anonymous();
   }
