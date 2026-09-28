@@ -12,14 +12,20 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.ServerWebInputException;
 
 import tacos.catalog.IngredientCatalogValidationException;
 import tacos.catalog.StockAdjustmentRejectedException;
 import tacos.coupon.CouponNotApplicableException;
 import tacos.inventory.InsufficientStockException;
+import tacos.paging.InvalidPageBoundsException;
 import tacos.pricing.InvalidQuantityException;
+import tacos.rating.InvalidRatingException;
+import tacos.recommendation.NoTacoOfTheDayException;
+import tacos.reorder.ReorderPaymentMethodRequiredException;
 import tacos.rules.RuleViolation;
 import tacos.rules.TacoDesignInvalidException;
+import tacos.search.InvalidTacoSearchException;
 import tacos.web.api.ApiProblem.Violation;
 
 @RestControllerAdvice
@@ -33,6 +39,22 @@ public class RestProblemHandler {
         .collect(Collectors.toList());
     return problem(HttpStatus.BAD_REQUEST, "Validation failed", "validation_error",
         "The request body does not satisfy the schema constraints.", violations, exchange);
+  }
+
+  /**
+   * A body that could not be read at all: truncated JSON, a wrong type for a
+   * field, or no body on a route that requires one.
+   *
+   * <p>This is a client mistake, so it is a 400 with a stable code. Letting it
+   * fall through to the catch-all would answer 500 and make an unescaped
+   * newline in a request look like an outage. Schema violations are a subclass
+   * of this and keep their own handler with the field-level detail.
+   */
+  @ExceptionHandler(ServerWebInputException.class)
+  public ResponseEntity<ApiProblem> handleUnreadableBody(
+      ServerWebInputException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Unreadable request", "malformed_request",
+        "The request body could not be read as the expected content type.", exchange);
   }
 
   @ExceptionHandler(OrderPatchValidationException.class)
@@ -128,6 +150,59 @@ public class RestProblemHandler {
       EmailOrderConversionException e, ServerWebExchange exchange) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Order rejected",
         "order_rejected", e.getMessage(), exchange);
+  }
+
+  // ------------------------------------------------------------------
+  // Laboratorio 4
+  // ------------------------------------------------------------------
+
+  @ExceptionHandler(InvalidPageBoundsException.class)
+  public ResponseEntity<ApiProblem> handleInvalidPageBounds(
+      InvalidPageBoundsException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Invalid pagination", "invalid_page",
+        e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(InvalidTacoSearchException.class)
+  public ResponseEntity<ApiProblem> handleInvalidSearch(
+      InvalidTacoSearchException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Invalid catalog search",
+        "invalid_search", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(InvalidRatingException.class)
+  public ResponseEntity<ApiProblem> handleInvalidRating(
+      InvalidRatingException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Invalid rating", "invalid_rating",
+        e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(AuthenticationRequiredException.class)
+  public ResponseEntity<ApiProblem> handleAuthenticationRequired(
+      AuthenticationRequiredException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.UNAUTHORIZED, "Authentication required",
+        "authentication_required", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(NoTacoOfTheDayException.class)
+  public ResponseEntity<ApiProblem> handleNoTacoOfTheDay(
+      NoTacoOfTheDayException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.NOT_FOUND, "No taco of the day",
+        "no_taco_of_the_day", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(TacoNotFoundException.class)
+  public ResponseEntity<ApiProblem> handleTacoNotFound(
+      TacoNotFoundException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.NOT_FOUND, "Taco not found", "taco_not_found",
+        e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(ReorderPaymentMethodRequiredException.class)
+  public ResponseEntity<ApiProblem> handleReorderPaymentMethod(
+      ReorderPaymentMethodRequiredException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Payment method required",
+        "reorder_payment_method_required", e.getMessage(), exchange);
   }
 
   @ExceptionHandler(DuplicateKeyException.class)

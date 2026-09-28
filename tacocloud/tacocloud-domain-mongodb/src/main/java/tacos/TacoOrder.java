@@ -7,12 +7,21 @@ import java.util.Date;
 import java.util.List;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import lombok.Data;
 
+/**
+ * A placed order. The {@code user} is embedded because an order is a private
+ * document of one customer: the history (TC-23) always reads through
+ * {@code user._id}, and the compound index below matches that access path
+ * exactly, so no query has to filter a global page down in memory.
+ */
 @Data
 @Document
+@CompoundIndex(name = "order_user_placed_idx",
+    def = "{'user._id': 1, 'placedAt': -1, '_id': -1}")
 public class TacoOrder implements Serializable {
   private static final long serialVersionUID = 1L;
 

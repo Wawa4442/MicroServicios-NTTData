@@ -43,6 +43,10 @@ public class SecurityConfig {
         .pathMatchers("/api/kitchen/**").hasRole("KITCHEN")
         // Operator-only catalog and inventory administration.
         .pathMatchers("/api/admin/**").hasRole("ADMIN")
+        // Laboratorio 4: a customer's own favorites and order history. The
+        // "me" in the path is the only selector there is, so this rule is what
+        // keeps one customer out of another's data.
+        .pathMatchers("/api/users/me/**").hasAnyRole("USER", "ADMIN")
         // Order lifecycle belongs to customers, the kitchen and operators;
         // rule-based ownership is enforced in OrderApiService.
         .pathMatchers("/api/orders/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
@@ -51,6 +55,12 @@ public class SecurityConfig {
         // Taco Physics design validation runs before any order is created.
         .pathMatchers(HttpMethod.POST, "/api/tacos/validate")
             .hasAnyRole("USER", "KITCHEN", "ADMIN")
+        // A rating is a customer's statement about the catalog, so it is their
+        // own write and not catalog administration. It has to be named before
+        // the ADMIN-only catch-all below, because authorizeExchange stops at the
+        // first matching rule: without it, a customer could not rate.
+        .pathMatchers(HttpMethod.PUT, "/api/tacos/*/rating")
+            .hasAnyRole("USER", "ADMIN")
         // The catalog can be read by any authenticated principal (the SPA
         // needs it to design tacos) but only administered by operators.
         .pathMatchers(HttpMethod.GET, "/api/ingredients/**")

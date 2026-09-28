@@ -9,8 +9,6 @@ import javax.validation.Valid;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,9 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import tacos.User;
 import tacos.api.dto.OrderCreateRequest;
 import tacos.api.dto.OrderMapper;
 import tacos.api.dto.OrderQuoteResponse;
@@ -52,26 +48,30 @@ public class OrderApiController {
   private final OrderApiService orderService;
   private final OrderMapper orderMapper;
   private final ObjectMapper objectMapper;
+  private final CallerIdentityResolver identities;
 
   public OrderApiController(OrderRepository repo,
                             OrderMessagingService orderMessages,
                             EmailOrderService emailOrderService,
                             OrderApiService orderService,
                             OrderMapper orderMapper,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            CallerIdentityResolver identities) {
     this.repo = repo;
     this.orderMessages = orderMessages;
     this.emailOrderService = emailOrderService;
     this.orderService = orderService;
     this.orderMapper = orderMapper;
     this.objectMapper = objectMapper;
+    this.identities = identities;
   }
 
-  @GetMapping(produces="application/json")
-  public Flux<OrderResponse> allOrders() {
-    return repo.findAll().map(OrderResponse::from);
-  }
-
+  /**
+   * There is deliberately no {@code GET /api/orders} listing every order here
+   * (TC-23). A global dump of other customers' orders was the default read of
+   * this resource, and replacing it with a "me" route plus an explicitly
+   * operator-only one is what makes the privacy property testable.
+   */
   @PostMapping(consumes="application/json")
   @ResponseStatus(HttpStatus.CREATED)
   public Mono<OrderResponse> postOrder(
@@ -160,22 +160,7 @@ public class OrderApiController {
    * authorization rules are enforced by the service and by TC-11 security.
    */
   private Mono<CallerIdentity> caller() {
-    return ReactiveSecurityContextHolder.getContext()
-        .map(ctx -> ctx.getAuthentication())
-        .filter(auth -> auth != null && auth.isAuthenticated())
-        .map(Authentication::getPrincipal)
-        .map(this::toCallerIdentity)
-        .defaultIfEmpty(CallerIdentity.anonymous());
-  }
-
-  private CallerIdentity toCallerIdentity(Object principal) {
-    if (principal instanceof User) {
-      User user = (User) principal;
-      boolean admin = user.getAuthorities().stream()
-          .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-      return admin ? CallerIdentity.admin() : CallerIdentity.user(user.getId());
-    }
-    return CallerIdentity.anonymous();
+    return identities.identity();
   }
 
 }

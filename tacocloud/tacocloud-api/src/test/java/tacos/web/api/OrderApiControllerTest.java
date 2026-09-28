@@ -71,6 +71,7 @@ public class OrderApiControllerTest {
   private CouponEngine coupons;
   private TacoValidator validator;
   private InventoryService inventory;
+  private CallerIdentityResolver identities;
   private WebTestClient client;
 
   @BeforeEach
@@ -105,10 +106,20 @@ public class OrderApiControllerTest {
     });
     when(ingredientRepo.<Ingredient>findById("FLTO"))
         .thenReturn(Mono.just(new Ingredient("FLTO", "Flour Tortilla", Ingredient.Type.WRAP)));
-    client = WebTestClient.bindToController(
-            new OrderApiController(repo, messages, emailService, orderService, orderMapper, new ObjectMapper()))
+    client = WebTestClient.bindToController(orderController())
         .controllerAdvice(new RestProblemHandler())
         .build();
+  }
+
+  /**
+   * The real resolver, not a stub: these tests already exercise the "whose
+   * order is this" rules through the security context, and a stubbed identity
+   * would hide exactly the wiring that Laboratorio 4 moved into the resolver.
+   */
+  private OrderApiController orderController() {
+    identities = new CallerIdentityResolver();
+    return new OrderApiController(repo, messages, emailService, orderService, orderMapper,
+        new ObjectMapper(), identities);
   }
 
   // =====================================================================
@@ -464,8 +475,7 @@ public class OrderApiControllerTest {
     });
     when(repo.save(any(TacoOrder.class))).thenAnswer(idAssigningSave());
 
-    OrderApiController controller =
-        new OrderApiController(repo, messages, emailService, orderService, orderMapper, new ObjectMapper());
+    OrderApiController controller = orderController();
     EmailOrder email = new EmailOrder();
 
     StepVerifier.create(controller.postOrderFromEmail(Mono.just(email)))
@@ -812,8 +822,7 @@ public class OrderApiControllerTest {
   private WebTestClient authenticatedClient(User user) {
     UsernamePasswordAuthenticationToken auth =
         new UsernamePasswordAuthenticationToken(user, user.getPassword(), user.getAuthorities());
-    return WebTestClient.bindToController(
-            new OrderApiController(repo, messages, emailService, orderService, orderMapper, new ObjectMapper()))
+    return WebTestClient.bindToController(orderController())
         .controllerAdvice(new RestProblemHandler())
         .webFilter((exchange, chain) -> chain.filter(exchange)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth)))

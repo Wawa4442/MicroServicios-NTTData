@@ -1,15 +1,16 @@
 package tacos.web.api;
 
 /**
- * Identity of the caller performing an order mutation.
+ * Identity of the caller performing a request.
  *
- * <p>When no authentication is present (the current security posture is
- * {@code permitAll}, resolved in TC-11) the caller is {@link #anonymous()}.
- * Once authentication exists, the caller carries the authenticated {@code userId}
- * or the {@code ADMIN} privilege, and ownership is enforced against the order's
- * embedded owner.
+ * <p>When no authentication is present the caller is {@link #anonymous()};
+ * once authentication exists the identity carries the authenticated
+ * {@code userId} and, for operators, the {@code admin} privilege alongside it.
+ * Keeping both matters: an operator is still a person with a personal order
+ * history, and collapsing the two into one flag would make those endpoints
+ * unusable for them.
  */
-class CallerIdentity {
+public final class CallerIdentity {
 
   private final String userId;
   private final boolean admin;
@@ -19,23 +20,23 @@ class CallerIdentity {
     this.admin = admin;
   }
 
-  static CallerIdentity anonymous() {
+  public static CallerIdentity anonymous() {
     return new CallerIdentity(null, false);
   }
 
-  static CallerIdentity user(String userId) {
+  public static CallerIdentity user(String userId) {
     return new CallerIdentity(userId, false);
   }
 
-  static CallerIdentity admin() {
-    return new CallerIdentity(null, true);
+  public static CallerIdentity admin(String userId) {
+    return new CallerIdentity(userId, true);
   }
 
-  String getUserId() {
+  public String getUserId() {
     return userId;
   }
 
-  boolean isAdmin() {
+  public boolean isAdmin() {
     return admin;
   }
 
