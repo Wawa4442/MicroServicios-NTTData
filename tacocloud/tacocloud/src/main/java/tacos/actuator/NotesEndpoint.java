@@ -1,8 +1,5 @@
 package tacos.actuator;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
 import org.springframework.boot.actuate.endpoint.annotation.DeleteOperation;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
@@ -10,44 +7,30 @@ import org.springframework.boot.actuate.endpoint.annotation.WriteOperation;
 import org.springframework.stereotype.Component;
 
 @Component
-@Endpoint(id="notes", enableByDefault=true)
+@Endpoint(id = "notes", enableByDefault = true)
 public class NotesEndpoint {
 
-  private List<Note> notes = new ArrayList<>();
+  private final tacos.announcements.AnnouncementService announcements;
+
+  public NotesEndpoint(tacos.announcements.AnnouncementService announcements) {
+    this.announcements = announcements;
+  }
 
   @ReadOperation
-  public List<Note> notes() {
-    return notes;
+  public reactor.core.publisher.Mono<java.util.List<tacos.announcements.AnnouncementResponse>> notes() {
+    return announcements.listActive()
+        .map(tacos.announcements.AnnouncementResponse::from)
+        .collectList();
   }
 
   @WriteOperation
-  public List<Note> addNote(String text) {
-    notes.add(new Note(text));
-    return notes;
+  public reactor.core.publisher.Mono<tacos.announcements.AnnouncementResponse> addNote(String text) {
+    return announcements.create(text, tacos.announcements.AnnouncementSeverity.INFO,
+        null, "actuator").map(tacos.announcements.AnnouncementResponse::from);
   }
 
   @DeleteOperation
-  public List<Note> deleteNote(int index) {
-    if (index < notes.size()) {
-      notes.remove(index);
-    }
-    return notes;
-  }
-
-  class Note {
-    private Date time = new Date();
-    private final String text;
-
-    public Note(String text) {
-      this.text = text;
-    }
-    
-    public Date getTime() {
-        return time;
-    }
-    
-    public String getText() {
-        return text;
-    }
+  public reactor.core.publisher.Mono<Void> deleteNote(String id) {
+    return announcements.deleteById(id);
   }
 }

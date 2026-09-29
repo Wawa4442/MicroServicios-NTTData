@@ -1,0 +1,819 @@
+openapi: 3.0.3
+info:
+  title: Taco Cloud API
+  description: >
+    Public contract v1 for Taco Cloud. Canonical prefix is /api/v1; /api keeps
+    working with Deprecation headers. Request/response schemas are DTOs, never
+    Mongo documents. Errors share ApiProblem. No password, authorities, PAN or
+    CVV ever appears here.
+  version: 1.0.0
+servers:
+  - url: /api/v1
+    description: Canonical v1
+  - url: /api
+    description: Legacy alias (deprecated)
+security:
+  - basicAuth: []
+tags:
+  - name: ingredients
+  - name: tacos
+  - name: orders
+  - name: favorites
+  - name: ratings
+  - name: kitchen
+  - name: coupons
+  - name: admin
+paths:
+  /ingredients:
+    get:
+      tags: [ingredients]
+      summary: List sellable ingredients
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Catalog page
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IngredientResponse'
+  /ingredients/{id}:
+    get:
+      tags: [ingredients]
+      summary: One ingredient
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngredientResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tacos:
+    get:
+      tags: [tacos]
+      summary: Search tacos with filters and stable paging
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: ingredientId
+          in: query
+          schema:
+            type: string
+        - name: diet
+          in: query
+          schema:
+            type: string
+            enum: [VEGAN, VEGETARIAN, GLUTEN_FREE]
+        - name: excludeAllergen
+          in: query
+          schema:
+            type: string
+        - name: spice
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Page of tacos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacoPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /tacos/validate:
+    post:
+      tags: [tacos]
+      summary: Validate a taco design before saving or quoting
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TacoDesignRequest'
+      responses:
+        '200':
+          description: Valid or violations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacoDesignResult'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /tacos/today:
+    get:
+      tags: [tacos]
+      summary: Deterministic taco of the day
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Recommendation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TacoOfTheDay'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /tacos/{id}/rating:
+    put:
+      tags: [ratings]
+      summary: Rate a taco once (repeat updates the vote)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingRequest'
+      responses:
+        '200':
+          description: Rating summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /tacos/top:
+    get:
+      tags: [ratings]
+      summary: Top tacos with minimum votes
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Ranking
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RatingSummary'
+  /orders:
+    post:
+      tags: [orders]
+      summary: Place an order (idempotent with Idempotency-Key)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreateRequest'
+            examples:
+              classic:
+                value:
+                  deliveryName: Alice
+                  deliveryStreet: Main 1
+                  deliveryCity: Austin
+                  deliveryState: TX
+                  deliveryZip: '78701'
+                  tacos:
+                    - name: Classic
+                      ingredientIds: [FLTO, CHED]
+                      quantity: 2
+                  paymentMethodId: pm-1
+      responses:
+        '201':
+          description: Created
+          headers:
+            X-Correlation-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /orders/quote:
+    post:
+      tags: [orders]
+      summary: Quote without persisting or reserving
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreateRequest'
+      responses:
+        '200':
+          description: Quote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderQuote'
+  /orders/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [orders]
+      summary: Patch delivery fields only
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderPatchRequest'
+      responses:
+        '200':
+          description: Patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [orders]
+      summary: Replace mutable content (path id wins)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreateRequest'
+      responses:
+        '200':
+          description: Replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+    delete:
+      tags: [orders]
+      summary: Delete while the kitchen has not started
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /orders/{id}/status:
+    patch:
+      tags: [orders]
+      summary: Advance lifecycle through the matrix
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderStatusChange'
+      responses:
+        '200':
+          description: Moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /orders/{id}/cancel:
+    post:
+      tags: [orders]
+      summary: Owner cancellation through the same matrix
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCancel'
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+  /users/me/favorites:
+    get:
+      tags: [favorites]
+      summary: My favorites, paged
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Favorites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Favorite'
+  /users/me/favorites/{tacoId}:
+    put:
+      tags: [favorites]
+      summary: Add favorite idempotently
+      parameters:
+        - name: tacoId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Favorite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [favorites]
+      summary: Remove favorite idempotently
+      parameters:
+        - name: tacoId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Removed
+  /users/me/orders:
+    get:
+      tags: [orders]
+      summary: My order history, newest first
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: History page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderPage'
+  /kitchen/queue:
+    get:
+      tags: [kitchen]
+      summary: FIFO queue of CREATED orders
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KitchenTicket'
+  /kitchen/queue/claim:
+    post:
+      tags: [kitchen]
+      summary: Atomic claim of the next ticket
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KitchenClaim'
+      responses:
+        '200':
+          description: Claimed ticket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KitchenTicket'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /coupons/validate:
+    post:
+      tags: [coupons]
+      summary: Validate a coupon without creating an order
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CouponValidate'
+      responses:
+        '200':
+          description: Decision (never enumerates codes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CouponDecision'
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Request correlation, echoed back and carried into events and logs.
+      schema:
+        type: string
+        example: order-flow-123
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 8-64 chars [A-Za-z0-9-_.:], scoped by user. Same key+same purchase replays, same key+other purchase is 409.
+      schema:
+        type: string
+        example: order-1234_ABCD
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    NotFound:
+      description: Not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    Conflict:
+      description: Conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    Unprocessable:
+      description: Business rule rejected
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+  schemas:
+    OrderCreateRequest:
+      type: object
+      required: [deliveryName, deliveryStreet, deliveryCity, deliveryState, deliveryZip, tacos]
+      properties:
+        deliveryName:
+          type: string
+        deliveryStreet:
+          type: string
+        deliveryCity:
+          type: string
+        deliveryState:
+          type: string
+          pattern: '[A-Z]{2}'
+        deliveryZip:
+          type: string
+          pattern: '\d{5}'
+        tacos:
+          type: array
+          items:
+            $ref: '#/components/schemas/TacoLine'
+        paymentMethodId:
+          type: string
+          description: Opaque reference, never a PAN.
+        couponCode:
+          type: string
+        idempotencyKey:
+          type: string
+          description: Legacy body key; prefer the Idempotency-Key header.
+    TacoLine:
+      type: object
+      required: [name, ingredientIds]
+      properties:
+        name:
+          type: string
+        ingredientIds:
+          type: array
+          items:
+            type: string
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 12
+    OrderResponse:
+      type: object
+      required: [id, status, total]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, ACCEPTED, PREPARING, READY, OUT_FOR_DELIVERY, DELIVERED, CANCELLED]
+        version:
+          type: integer
+        deliveryName:
+          type: string
+        deliveryCity:
+          type: string
+        deliveryState:
+          type: string
+        subtotal:
+          type: number
+        discount:
+          type: number
+        total:
+          type: number
+        currency:
+          type: string
+          example: USD
+        placedAt:
+          type: string
+          format: date-time
+        paymentBrand:
+          type: string
+          description: Display only, e.g. VISA.
+        paymentLast4:
+          type: string
+    OrderQuote:
+      type: object
+      properties:
+        subtotal:
+          type: number
+        discount:
+          type: number
+        total:
+          type: number
+        currency:
+          type: string
+    OrderPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderResponse'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+    OrderPatchRequest:
+      type: object
+      properties:
+        deliveryName:
+          type: string
+        deliveryStreet:
+          type: string
+        deliveryCity:
+          type: string
+        deliveryState:
+          type: string
+        deliveryZip:
+          type: string
+    OrderStatusChange:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+        reason:
+          type: string
+          maxLength: 280
+    OrderCancel:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 280
+    IngredientResponse:
+      type: object
+      required: [id, name, type]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        unitPrice:
+          type: number
+        available:
+          type: boolean
+    TacoPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/TacoResponse'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        hasNext:
+          type: boolean
+    TacoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngredientResponse'
+    TacoDesignRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        ingredientIds:
+          type: array
+          items:
+            type: string
+    TacoDesignResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+    TacoOfTheDay:
+      type: object
+      properties:
+        taco:
+          $ref: '#/components/schemas/TacoResponse'
+        date:
+          type: string
+          format: date
+        reason:
+          type: string
+    RatingRequest:
+      type: object
+      required: [score]
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+    RatingSummary:
+      type: object
+      properties:
+        tacoId:
+          type: string
+        tacoName:
+          type: string
+        average:
+          type: number
+        votes:
+          type: integer
+    Favorite:
+      type: object
+      properties:
+        tacoId:
+          type: string
+        tacoName:
+          type: string
+        savedAt:
+          type: string
+          format: date-time
+        orphaned:
+          type: boolean
+    KitchenTicket:
+      type: object
+      properties:
+        orderId:
+          type: string
+        tacoCount:
+          type: integer
+        stationId:
+          type: string
+        cookId:
+          type: string
+        estimatedPrepMinutes:
+          type: integer
+    KitchenClaim:
+      type: object
+      properties:
+        stationId:
+          type: string
+        cookId:
+          type: string
+    CouponValidate:
+      type: object
+      properties:
+        code:
+          type: string
+        subtotal:
+          type: number
+    CouponDecision:
+      type: object
+      properties:
+        status:
+          type: string
+        discount:
+          type: number
+        normalizedCode:
+          type: string
+    ApiProblem:
+      type: object
+      required: [type, title, status, detail, instance, code]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        violations:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string

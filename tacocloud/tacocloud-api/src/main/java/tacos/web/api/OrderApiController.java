@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Mono;
 import tacos.OrderStatus;
 import tacos.TacoOrder;
+import tacos.observability.CorrelationIds;
 import tacos.api.dto.OrderCreateRequest;
 import tacos.api.dto.OrderMapper;
 import tacos.api.dto.OrderQuoteResponse;
@@ -92,11 +93,11 @@ public class OrderApiController {
   @ResponseStatus(HttpStatus.CREATED)
   public Mono<OrderResponse> postOrder(
       @RequestBody @Valid OrderCreateRequest request,
-      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
-    String correlation = correlationId == null || correlationId.trim().isEmpty()
-        ? UUID.randomUUID().toString() : correlationId.trim();
+      @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId,
+      @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+    String correlation = CorrelationIds.normalize(correlationId);
     return caller()
-        .flatMap(caller -> placement.placeOrder(request, caller, correlation))
+        .flatMap(caller -> placement.placeOrder(request, caller, correlation, idempotencyKey))
         .map(OrderResponse::from);
   }
 
@@ -105,8 +106,7 @@ public class OrderApiController {
   public Mono<OrderResponse> postOrderFromEmail(
       @RequestBody Mono<EmailOrder> emailOrder,
       @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
-    String correlation = correlationId == null || correlationId.trim().isEmpty()
-        ? UUID.randomUUID().toString() : correlationId.trim();
+    String correlation = CorrelationIds.normalize(correlationId);
     return emailOrderService.convertEmailOrderToDomainOrder(emailOrder)
         .map(order -> {
           order.setReservationKey(UUID.randomUUID().toString());
@@ -172,8 +172,7 @@ public class OrderApiController {
       @PathVariable("orderId") String orderId,
       @RequestBody @Valid OrderStatusChangeRequest request,
       @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
-    String correlation = correlationId == null || correlationId.trim().isEmpty()
-        ? UUID.randomUUID().toString() : correlationId.trim();
+    String correlation = CorrelationIds.normalize(correlationId);
     return caller()
         .flatMap(caller -> repo.findById(orderId)
             .switchIfEmpty(Mono.error(new OrderNotFoundException(orderId)))
@@ -204,8 +203,7 @@ public class OrderApiController {
       @RequestBody(required = false) OrderCancelRequest request,
       @RequestHeader(name = "X-Correlation-ID", required = false) String correlationId) {
     String reason = request == null ? null : request.getReason();
-    String correlation = correlationId == null || correlationId.trim().isEmpty()
-        ? UUID.randomUUID().toString() : correlationId.trim();
+    String correlation = CorrelationIds.normalize(correlationId);
     return caller()
         .flatMap(caller -> repo.findById(orderId)
             .switchIfEmpty(Mono.error(new OrderNotFoundException(orderId)))

@@ -240,6 +240,38 @@ public class RestProblemHandler {
         "The request conflicts with the current state of the resource.", exchange);
   }
 
+  // ------------------------------------------------------------------
+  // Laboratorio 6 — operacion y calidad
+  // ------------------------------------------------------------------
+
+  @ExceptionHandler(tacos.announcements.AnnouncementNotFoundException.class)
+  public ResponseEntity<ApiProblem> handleAnnouncementNotFound(
+      tacos.announcements.AnnouncementNotFoundException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.NOT_FOUND, "Announcement not found",
+        "announcement_not_found", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(tacos.announcements.AnnouncementValidationException.class)
+  public ResponseEntity<ApiProblem> handleAnnouncementInvalid(
+      tacos.announcements.AnnouncementValidationException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid announcement",
+        "announcement_invalid", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(tacos.idempotency.IdempotencyConflictException.class)
+  public ResponseEntity<ApiProblem> handleIdempotencyConflict(
+      tacos.idempotency.IdempotencyConflictException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.CONFLICT, "Idempotency conflict",
+        "idempotency_conflict", e.getMessage(), exchange);
+  }
+
+  @ExceptionHandler(tacos.idempotency.InvalidIdempotencyKeyException.class)
+  public ResponseEntity<ApiProblem> handleInvalidIdempotencyKey(
+      tacos.idempotency.InvalidIdempotencyKeyException e, ServerWebExchange exchange) {
+    return problem(HttpStatus.BAD_REQUEST, "Invalid idempotency key",
+        "invalid_idempotency_key", e.getMessage(), exchange);
+  }
+
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ApiProblem> handleGeneric(
       Exception e, ServerWebExchange exchange) {

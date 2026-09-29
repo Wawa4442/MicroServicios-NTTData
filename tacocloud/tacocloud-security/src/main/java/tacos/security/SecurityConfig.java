@@ -39,38 +39,43 @@ public class SecurityConfig {
             "/*.js", "/*.css", "/*.ico", "/*.map",
             "/*.png", "/*.jpg", "/*.svg", "/*.woff2",
             "/actuator/health").permitAll()
+        // Versioned contract is readable by any authenticated caller; the
+        // version filter rewrites v1 to the same handlers, so the rules below
+        // mirror for both prefixes (TC-35).
+        .pathMatchers(HttpMethod.GET, "/api/openapi.yaml", "/api/v1/openapi.yaml")
+            .authenticated()
         // Kitchen consumes recent orders through a dedicated gateway.
         // Operators share it (TC-25/TC-26): an ADMIN advancing a stuck
         // ticket is the same lifecycle move, not a different resource.
-        .pathMatchers("/api/kitchen/**").hasAnyRole("KITCHEN", "ADMIN")
+        .pathMatchers("/api/kitchen/**", "/api/v1/kitchen/**").hasAnyRole("KITCHEN", "ADMIN")
         // Operator-only catalog and inventory administration.
-        .pathMatchers("/api/admin/**").hasRole("ADMIN")
+        .pathMatchers("/api/admin/**", "/api/v1/admin/**").hasRole("ADMIN")
         // Laboratorio 4: a customer's own favorites and order history. The
         // "me" in the path is the only selector there is, so this rule is what
         // keeps one customer out of another's data.
-        .pathMatchers("/api/users/me/**").hasAnyRole("USER", "ADMIN")
+        .pathMatchers("/api/users/me/**", "/api/v1/users/me/**").hasAnyRole("USER", "ADMIN")
         // Order lifecycle belongs to customers, the kitchen and operators;
         // rule-based ownership is enforced in OrderApiService.
-        .pathMatchers("/api/orders/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
+        .pathMatchers("/api/orders/**", "/api/v1/orders/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
         // Coupon validation belongs to whoever is building an order.
-        .pathMatchers("/api/coupons/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
+        .pathMatchers("/api/coupons/**", "/api/v1/coupons/**").hasAnyRole("USER", "KITCHEN", "ADMIN")
         // Taco Physics design validation runs before any order is created.
-        .pathMatchers(HttpMethod.POST, "/api/tacos/validate")
+        .pathMatchers(HttpMethod.POST, "/api/tacos/validate", "/api/v1/tacos/validate")
             .hasAnyRole("USER", "KITCHEN", "ADMIN")
         // A rating is a customer's statement about the catalog, so it is their
         // own write and not catalog administration. It has to be named before
         // the ADMIN-only catch-all below, because authorizeExchange stops at the
         // first matching rule: without it, a customer could not rate.
-        .pathMatchers(HttpMethod.PUT, "/api/tacos/*/rating")
+        .pathMatchers(HttpMethod.PUT, "/api/tacos/*/rating", "/api/v1/tacos/*/rating")
             .hasAnyRole("USER", "ADMIN")
         // The catalog can be read by any authenticated principal (the SPA
         // needs it to design tacos) but only administered by operators.
-        .pathMatchers(HttpMethod.GET, "/api/ingredients/**")
+        .pathMatchers(HttpMethod.GET, "/api/ingredients/**", "/api/v1/ingredients/**")
             .hasAnyRole("USER", "KITCHEN", "ADMIN")
-        .pathMatchers(HttpMethod.GET, "/api/tacos/**")
+        .pathMatchers(HttpMethod.GET, "/api/tacos/**", "/api/v1/tacos/**")
             .hasAnyRole("USER", "KITCHEN")
-        .pathMatchers("/api/ingredients/**").hasRole("ADMIN")
-        .pathMatchers("/api/tacos/**").hasRole("ADMIN")
+        .pathMatchers("/api/ingredients/**", "/api/v1/ingredients/**").hasRole("ADMIN")
+        .pathMatchers("/api/tacos/**", "/api/v1/tacos/**").hasRole("ADMIN")
         // Legacy Data REST and management endpoints are operator-only.
         .pathMatchers("/data-api/**").hasRole("ADMIN")
         .pathMatchers("/actuator/**").hasRole("ADMIN")

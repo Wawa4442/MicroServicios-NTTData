@@ -2,6 +2,7 @@ package tacos.consumer;
 
 import java.time.Instant;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import tacos.OrderStatus;
 import tacos.data.OrderRepository;
 import tacos.messaging.OrderEvent;
 import tacos.messaging.OrderEventType;
+import tacos.observability.TacoBusinessMetrics;
 import tacos.web.api.CallerIdentity;
 import tacos.workflow.InvalidOrderStatusException;
 import tacos.workflow.OrderWorkflowService;
@@ -41,6 +43,9 @@ public class OrderEventConsumer {
   private final OrderWorkflowService workflow;
   private final ConsumerProperties props;
   private final ConsumerMetrics metrics;
+
+  @Autowired(required = false)
+  private TacoBusinessMetrics business;
 
   public OrderEventConsumer(ProcessedEventRepository processed,
                             DeadLetterRepository deadLetters,
@@ -196,7 +201,12 @@ public class OrderEventConsumer {
     letter.setAttempts(attempt);
     letter.setFailedAt(Instant.now());
     return deadLetters.save(letter)
-        .doOnSuccess(ignored -> metrics.deadLettered())
+        .doOnSuccess(ignored -> {
+          metrics.deadLettered();
+          if (business != null) {
+            business.dlqParked(cause);
+          }
+        })
         .then();
   }
 

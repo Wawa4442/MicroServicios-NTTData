@@ -96,3 +96,26 @@ tacocloud:
     base-backoff: 2s
     destination: ${TACOCLOUD_CONSUMER_DESTINATION:tacocloud.order.queue}
     dead-letter-destination: ${TACOCLOUD_DLQ_DESTINATION:tacocloud.order.dlq}
+  announcements:
+    max-active: 20
+    max-length: 500
+    default-ttl: 7d
+  idempotency:
+    ttl: 24h
+    key-pattern: "[A-Za-z0-9\\-_.:]{8,64}"
+---
+# Operation and quality (TC-31/TC-32). Correlation travels in logs, metrics
+# explain the shop and health stays honest without leaking secrets.
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:api},%X{correlationId:-}]"
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
